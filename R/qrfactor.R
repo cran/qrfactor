@@ -1,8 +1,23 @@
-rq <- function(data,obs_start=NULL)
+rq <- function(data,obs_start=NULL,mod_type='sd')
 {
 x<-data
-#standardize the data 
+#standardize the data default: by standard deviation 
 x_standard<-scale(x,center=TRUE,scale=TRUE)/sqrt(nrow(x))
+#no standardisation; use original data
+ if (mod_type == 'data') { 
+x_standard<-as.matrix(x)
+}
+
+#standardize by standard deviation
+if (mod_type == 'sd') { 
+x_standard<-scale(x,center=TRUE,scale=TRUE)/sqrt(nrow(x))
+
+}
+
+#standardize by square root of n
+if (mod_type =='n') { 
+x_standard<-scale(x,center=TRUE,scale=FALSE)/sqrt(nrow(x))
+}
 
 #develop correlation matrix
 corr_matrix<-cor(x_standard)
@@ -85,21 +100,20 @@ rownames(Q_mode_loading) <- rownames(Q_mode_loading, do.NULL = FALSE, prefix = "
 
 list(correlation=corr_matrix,eigen.vector=eigen_vector,eigen.value=eigen_val,
 diagonal.matrix=diagonal_matrix,r.loading=R_loading,q.loading=Q_mode_loading,
-combined.loadings=all_loadings,
-r.scores=rscores,q.scores=qscores,combined.scores=combined.scores,data=x,
+combined.loadings=all_loadings,r.scores=rscores,q.scores=qscores,combined.scores=combined.scores,data=x,
 rownames=rownames,variables=variables,x.standard=x_standard,loadings=all_loadings,scores=combined.scores)
 }
 
 #generic function
-qrfactor<-function(data,obs_start=NULL) UseMethod ("qrfactor")
+qrfactor<-function(data,obs_start=NULL,mod_type="sd") UseMethod ("qrfactor")
 
 #default function
-qrfactor.default<-function(data,obs_start)
+qrfactor.default<-function(data,obs_start=NULL,mod_type="sd")
 {
 #convert file data to matrix
 x<-as.matrix(data)
 
-factor<-rq(data,obs_start)
+factor<-rq(data,obs_start,mod_type)
 
 factor$call<-match.call()
 
@@ -163,5 +177,3 @@ plot(x$combined.loadings[,1],x$combined.loadings[,2],xlab="Factor 1",ylab="Facto
  text(x$combined.loadings[,1],x$combined.loadings[,2], row.names( x$combined.loadings), cex=0.6, pos=4, col="red")  
 }
 
-
- 

@@ -1,4 +1,5 @@
-94d339cc08c6705980827bb15ffb1b94 *DESCRIPTION
-d3b567207e072f13478555adaa2242a3 *R/QRfactorpackage11annotated.R
-dd0234805758e6605b85c770efbcf01b *man/qrfactor-internal.Rd
-321a7861b6cc40f703d5d1c4b4a99610 *man/qrfactor.Rd
+cc692d858bd6251cca39a2d3f8b1c336 *DESCRIPTION
+50134d9f7f0746c889d4cc0635fb266e *R/qrfactor.R
+dcafa27fa65aa50e792d5816c64b44f8 *inst/doc/qrfactortutorials.pdf
+e93bc4748d0f81da4ff3e5812cb167fb *man/qrfactor-internal.Rd
+5b672aea7cafc07bf6c8497071e3ba1b *man/qrfactor.Rd
