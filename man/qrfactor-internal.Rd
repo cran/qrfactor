@@ -3,12 +3,11 @@
 \title{Internal Q and R mode Factor analysis function}
 \description{An internal function to simultaneoulsy estimates of Q and R mode factor analysis loadings and scores. It is for internal use only}
 \usage{
-rq(data,obs_start,mod_type)
+rq(data,scale)
 }
 \arguments{
 \item{data}{a numeric design matrix for the model. }
-\item{obs_start}{ a numeric record where the row names start.  }
-\item{mod_type}{ Standardisation method that you want to use. Set it to "data" if you do not desire data transformation; set it to "sd" if you want the data to be standardised after centring it; set it to "n" if you want to divide the centred data by square root of the number of observations. The default is "sd" i.e. data.standard<-scale(data,center=TRUE,scale=TRUE)/sqrt(nrow(data))
+\item{scale}{ Standardisation method that you want to use. Set it to "data" if you do not desire data transformation; set it to "sd" if you want the data to be standardised after centring it; set it to "n" if you want to divide the centred data by square root of the number of observations. The default is "sd" )
    }
 }
 \value{
