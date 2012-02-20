@@ -1,10 +1,12 @@
 Package: qrfactor
 Type: Package
-Title: Simultaneous simulation of Q and R mode factor analyses
-Version: 1.2
+Title: Simultaneous simulation of Q and R mode factor analyses with
+        Spatial data
+Version: 1.3
 Date: 2012-02-20
 Author: George Owusu <owusugeorge@ug.edu.gh>
-Maintainer: George Owusu <owusugeorge@ug.edu.gh>
+Maintainer: George Owusu <gowusu@gmail.com>
+Depends: R (>= 2.10), mvoutlier,mgraph,pvclust,cluster,maptools
 Suggests: MASS
 Description: The qrfactor package simultaneously runs both Q and R mode
         factor analyses. The package contains only one function called
@@ -14,9 +16,11 @@ Description: The qrfactor package simultaneously runs both Q and R mode
         Scaling (MDS). Loadings and scores can easily be computed from
         the simulation.The plot.qrfactor() function offers several
         annotated biplots for all possible combinations of
-        eigenvectors, loadings, and scores.
+        eigenvectors, loadings, and scores. Input data includes
+        shapefiles, tables and dataframe
 URL: http://www.openictghana.com/qrfactor
 License: GPL-2
-Packaged: 2012-02-20 15:21:11 UTC; george
+Packaged: 2013-04-17 14:37:54 UTC; george
+NeedsCompilation: no
 Repository: CRAN
-Date/Publication: 2012-02-21 09:14:08
+Date/Publication: 2013-04-18 08:27:36
