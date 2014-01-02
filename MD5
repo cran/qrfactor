@@ -1,6 +1,6 @@
-97149fd767d3f7470305620e241362db *DESCRIPTION
+bae8c3c40bd3ffef39820ab25b419de7 *DESCRIPTION
 2ad3539c2080c526f3431b7ed8fadfcc *NAMESPACE
-cf9af6fd38da5f11c7c83ea514826395 *R/qrfactor14.R
+df8cdacbe2eb387e7b00a98b9f597cfb *R/qrfactor14b.R
 ca3d67cb611ef9f04a35f6fab3e70e14 *inst/external/Africa/wssinfo_data.csv
 8ce6269b3b4ef86029b7263ec534c0c8 *inst/external/Africanfreshwater.csv
 8f8ece36ab4ca854828b40e113789970 *inst/external/Africanfreshwater.dbf
@@ -14,10 +14,12 @@ ca3d67cb611ef9f04a35f6fab3e70e14 *inst/external/Africa/wssinfo_data.csv
 6e06b35ba87af60745a1bcaded4a51b8 *inst/external/Ghana/Regions.sbx
 77c7452aade8f717f6fa2cdb657573a2 *inst/external/Ghana/Regions.shp
 8b7a884050ade1c56bc3b4e8e8337174 *inst/external/Ghana/Regions.shx
+134dbcef4376e55992bc0367c7cea61d *inst/external/qrfactor12regionsadmin.R
 0f04764e218f693fca5326eebe0ac363 *inst/external/qrfactor14.R
-4703b95a0d21ec5fb5333b9024b3f0f6 *inst/external/qrfactor14admin.R
+7ee9deb998fb480bbab451fc31213b55 *inst/external/qrfactor14_2_.R
+0f04764e218f693fca5326eebe0ac363 *inst/external/qrfactor14admin.R
 087cad6ae2537d0b3552fa036dfa7268 *man/qrfactor-internal.Rd
-2bff499c48ca52a38047269cc34bf215 *man/qrfactor.Rd
+2190ce6d8c52fef46051f1a184bebfed *man/qrfactor.Rd
 b447f63821052740b8dfc713b599cb0c *tests/MDS.R
 cd3a6ab34339efe25d9613451e8a7126 *tests/PCA.R
 bf7cc2122657f7cd1fd0924e9b2eea96 *tests/PCO.R

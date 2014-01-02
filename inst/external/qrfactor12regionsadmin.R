@@ -7,6 +7,12 @@
 rq <- function (source,layer='',var=NULL,type='',predict="Yes",scale="sd",transform='',nfactors=2,match=NULL,matchfile=NULL,...)
 {
 #read data
+if(is.null(var)){
+var=names(source)
+}else{
+var=var
+}
+
 if(!is.null(match)){
 if(typeof(source)=="S4"){
 object <- source
@@ -60,7 +66,7 @@ if(nonspatial<1){
 if(layer==""||layer=="nofile"||layer=="notfile"||layer=="nonfile"){
 object=source
 variables=object
-if(var!=""){
+if(!is.null(var)){
 variables=object[var]
 }
 }
@@ -100,10 +106,6 @@ variables=object[var]
 }
 if(!is.null(match)&&!is.null(matchfile)){
 gisdata2 <- object
-if(typeof(matchfile)=="S4"){
-table=matchfile@data
-}
-else{
 log=grep('.csv',matchfile)
 if(length(log)>0)
 {
@@ -111,19 +113,16 @@ table=read.csv(matchfile,header=TRUE)
 }
 else{
 table=matchfile
+if(typeof(matchfile)=="S4"){
+table=matchfile@data
 }
 }
-row.names(table)=table[[match]]
-table=table[row.names(table) %in% gisdata2[[match]],]
 
 #csv=paste(paste(source,layer,sep="/"),"csv",sep=".")
 #table=read.csv(csv,header=TRUE)
+row.names(table)=table[[match]]
 row.names(slot(gisdata2, "data"))=gisdata2[[match]]
 row.names(gisdata2)=row.names(slot(gisdata2, "data"))
-
-gisdata2=gisdata2[row.names(gisdata2) %in% table[[match]],]
-
-
 o <- match(gisdata2[[match]], table[[match]])
 variables1=table[o,]
 object<- spCbind(gisdata2, variables1)
@@ -311,6 +310,7 @@ rownames(all_loadings) <- c(rownames)
 
 #}
 }
+#print ("here")
 
 rownames(Q_mode_loading) <- rownames(Q_mode_loading, do.NULL = FALSE, prefix = "")
 #check for validity of the model
@@ -322,17 +322,77 @@ pca.scores=eigen_vector*data
 rownames(pca.scores) <- rownames(data)
 data1=object
 if(predict=="yes"||predict=="Yes"){
-object$Factor1=rscores[,1]
-object$Factor2=rscores[,2]
-x$Factor1=rscores[,1]
-x$Factor2=rscores[,2]
+#print ("here")
+
+if(typeof(object)=="list"){
+#print ("s3")
+
+object$cluster <- kmeans(scale(data), nfactors)$cluster # 
+object$means=round(rowMeans(object[names(data)]),digits=0)
+object$meanrank1=rank(object$means, ties.method = c( "first"))
+object$meanindex1=round(object$meanrank1/max(object$meanrank1),digits=2)
+}
+else
+{
+object$cluster <- kmeans(scale(data), nfactors)$cluster # 
+object$means=round(rowMeans(object@data[names(data)]),digits=0)
+object$meanrank1=rank(object@data$means, ties.method = c( "first"))
+object$meanindex1=round(object@data$meanrank1/max(object@data$meanrank1),digits=2)
+
+}
+i=1
+while (i<=length(data)){
+object[[paste("Factor",i,sep="")]]=rscores[,i]
+x[[paste("Factor",i,sep="")]]=rscores[,i]
+if(typeof(object)=="list"){
+
+object[paste("rank",i,sep="")]=rank(object[paste("Factor",i,sep="")], ties.method = c( "first"))
+object[paste("index",i,sep="")]=round(object[paste("rank",i,sep="")]/max(object[paste("rank",i,sep="")]),digits=2)
+
+if(cor(object$meanindex1,object[paste("index",i,sep="")])<0){
+object[paste("rank",i,sep="")]=rank(-object[paste("Factor",i,sep="")])
+object[paste("index",i,sep="")]=round((object[paste("rank",i,sep="")])/max(object[paste("rank",i,sep="")]),digits=2)
+}
+#print ("s3")
+
+object[paste("rank",i,sep="")]=rank(-object[paste("index",i,sep="")])
+object$meanrank1=rank(-object$meanindex1)
+
+object[paste("cluster",i,sep="")]=kmeans(object[paste("index",i,sep="")],nfactors)$cluster
+}
+else
+{
+#print ("s4")
+object[[paste("rank",i,sep="")]]=rank(object@data[[paste("Factor",i,sep="")]], ties.method = c( "first"))
+object[[paste("index",i,sep="")]]=round(object@data[[paste("rank",i,sep="")]]/max(object[[paste("rank",i,sep="")]]),digits=2)
+
+if(cor(object@data$meanindex1,object@data[[paste("index",i,sep="")]])<0){
+object[[paste("rank",i,sep="")]]=rank(-object@data[[paste("Factor",i,sep="")]])
+object[[paste("index",i,sep="")]]=round((object@data[[paste("rank",i,sep="")]])/max(object[[paste("rank",i,sep="")]]),digits=2)
+}
+#print ("continue")
+
+object[[paste("rank",i,sep="")]]=rank(-object@data[[paste("index",i,sep="")]])
+object$meanrank1=rank(-object@data$meanindex1)
+
+object[[paste("cluster",i,sep="")]]=kmeans(object@data[paste("index",i,sep="")],nfactors)$cluster
+
+}
+
+i=i+1
+}
+object[["index"]]=object[["index1"]]
+#object$Factor1=rscores[,1]
+#object$Factor2=rscores[,2]
+#x$Factor1=rscores[,1]
+#x$Factor2=rscores[,2]
 x$loading=Q_mode_loading
 }
 
 variance=eigen_val/colSums(as.matrix(eigen_val))*100
 cumvariance=cumsum(eigen_val/colSums(as.matrix(eigen_val))*100)
 #indices
-if(typeof(object)=="S4"){
+if(typeof(object)=="S44"){
 object$cluster <- kmeans(scale(data), nfactors)$cluster # 
 
 object$rank1=rank(object@data$Factor1, ties.method = c( "first"))
@@ -346,6 +406,7 @@ sort2 <- object[order(object$rank2) , ]
 den=min(c(max(object$rank1),100))
 object$index=round(object$rank1/max(object$rank1),digits=2)
 
+object$index1=object$index
 if(cor(object$meanindex1,object$index)<0){
 object$rank1=rank(-object@data$Factor1)
 object$index=round((object$rank1)/max(object$rank1),digits=2)
@@ -361,8 +422,68 @@ object$index2=round((object$rank2)/max(object$rank2),digits=2)
 }
 object$rank2=rank(-object@data$index2)
 
+object$cluster1 <- kmeans(object$index1, nfactors)$cluster # 
+object$cluster2 <- kmeans(object$index2, nfactors)$cluster # 
+
 
 }
+
+if(typeof(object)=="S44"){
+#print("yes")
+
+object$cluster <- kmeans(scale(data), nfactors)$cluster # 
+#print(object$cluster)
+object$rank1=rank(object$Factor1, ties.method = c( "first"))
+object$rank2=rank(object$Factor2)
+object$means=round(rowMeans(object[names(data)]),digits=0)
+object$meanrank1=rank(object$means, ties.method = c( "first"))
+object$meanindex1=round(object$meanrank1/max(object$meanrank1),digits=2)
+sort1 <- object[order(object$rank1) , ]
+sort2 <- object[order(object$rank2) , ]
+
+#summary(sort1)
+den=min(c(max(object$rank1),100))
+object$index=round(object$rank1/max(object$rank1),digits=2)
+object$index1=object$index
+
+#print(object$cluster1)
+if(cor(object$meanindex1,object$index)<0){
+object$rank1=rank(-object$Factor1)
+object$index=round((object$rank1)/max(object$rank1),digits=2)
+object$index1=object$index
+}
+object$meanrank1=rank(-object$meanindex1)
+object$rank1=rank(-object$index)
+
+object$index2=round(object$rank2/max(object$rank2),digits=2)
+if(cor(object$meanindex1,object$index2)<0){
+object$rank2=rank(-object$Factor2)
+object$index2=round((object$rank2)/max(object$rank2),digits=2)
+}
+object$rank2=rank(-object$index2)
+
+
+if(eigen_val[3]>=1){
+object$rank3=rank(object$Factor3)
+object$index3=round(object$rank3/max(object$rank3),digits=2)
+if(cor(object$meanindex1,object$index3)<0){
+object$rank3=rank(-object$Factor3)
+object$index3=round((object$rank3)/max(object$rank3),digits=2)
+object$cluster3 <- kmeans(object$index3, nfactors)$cluster # 
+object$rank3=rank(-object$index3)
+
+}
+
+
+}
+
+
+object$cluster1 <- kmeans(object$index1, nfactors)$cluster # 
+object$cluster2 <- kmeans(object$index2, nfactors)$cluster # 
+
+
+}
+
 
 list(gisdata=object,correlation=corr_matrix,eigen.vector=eigen_vector,eigen.value=eigen_val,
 diagonal.matrix=diagonal_matrix,r.loading=R_loading,q.loading=Q_mode_loading,
@@ -393,8 +514,8 @@ summary.qrfactor<-function(object,...)
 x<-object
 cat("Call:\n")
 print(x$call)
-cat("\nCall: correlation matrix\n")
-print(x$correlation)
+#cat("\nCall: correlation matrix\n")
+#print(x$correlation)
 
 cat("\n eigen  value\n")
 print(x$eigen.value)
@@ -475,7 +596,7 @@ else
 }
 
 }
-label <- function(x,var=NULL,cex=0.5,pos=1) {
+label <- function(x,var=NULL,cex=0.8,pos=1) {
     do.call("list", ISO.sp.label(x,var,cex,pos))
 }
 log=FALSE
@@ -839,7 +960,7 @@ text(x$q.loading[,factors[1]],x$q.loading[,factors[2]], labels=values, cex=0.9, 
 }
 
 points(x$r.loading[,factors[1]],x$r.loading[,factors[2]],pch=1, main="R- and Q- Mode FA")
-text(x$r.loading[,factors[1]],x$r.loading[,factors[2]], row.names( x$r.loading), cex=0.9, pos=3, col="green")  
+text(x$r.loading[,factors[1]],x$r.loading[,factors[2]], row.names( x$r.loading), cex=1.1, pos=3, col="black",font=4)  
 
 if(this>1){
 legend=legend(legend, legend = round(legValsAvg,0), pch = pch, pt.cex = legVals,bty = "n", title = paste("Legend",cexa,sep=":"))
@@ -891,42 +1012,110 @@ if(plot=="compare"||type=="compare"||plot=="cluster"||type=="cluster"){
  #windows(xpos = 0, ypos = 0)
 nfactors=x$nfactors
 fit <- kmeans(scale(x$data), nfactors,...) # 
-clusplot(scale(x$data), fit$cluster,main=main, color=TRUE, shade=TRUE,labels=2, lines=0)
+fit1 <- kmeans(x$gisdata$index1, nfactors,...) # 
+fit2 <- kmeans(x$gisdata$index2, nfactors,...) # 
 
-if(plot=="map"||type=="map"){
+if(typeof(x$gisdata)=="S4"){
 
-
- #windows(xpos = 300, ypos = 0)
-x$gisdata$cluster=fit$cluster 
-#plot(spplot(x$gisdata,c("cluster"),scales=list(draw = TRUE),sp.layout = list(label(x$gisdata),label(x$gisdata,c("cluster"),pos=3)),col.regions= bpy.colors(100),main=paste("Cluster members",main,sep=" ")))
-#plot(spplot(x$gisdata,c("cluster"),scales=list(draw = TRUE),sp.layout = list(label(x$gisdata),label(x$gisdata,c("cluster"),pos=3)),col.regions= gray.colors(100),main=paste("Cluster members",main,sep=" ")))
-#print(spplot(x$gisdata,c("cluster"),scales=list(draw = TRUE), sp.layout = list(label(x$gisdata),label(x$gisdata,c("cluster"),pos=3),col.regions=gray.colors(100),main=paste("Cluster members",main,sep=" ")))
-#plot=spplot(x$gisdata,c("cluster"),sp.layout =list(label(x$gisdata,var="cluster",pos=2),label(x$gisdata,pos=3)),scales=list(draw = TRUE),col=bpy.colors(100),main=paste(main,"Cluster members",sep=" "))
-#plot=spplot(x$gisdata,c("cluster"),sp.layout =list(label(x$gisdata,var="cluster",pos=2),label(x$gisdata,pos=3)),scales=list(draw = TRUE),col.regions=gray.colors(100),main=paste(main,"Cluster members",sep=" "))
-
-
-#windows(xpos = 300, ypos = 0)
-#print(spplot(x$gisdata,c("cluster"),scales=list(draw = TRUE), sp.layout = label(x$gisdata,c("cluster")),col.regions=gray.colors(100),main=paste("Cluster members",main,sep="_")))
-#print(spplot(x$gisdata,c("cluster"),scales=list(draw = TRUE),sp.layout = label(x$gisdata,c("cluster")),col.regions= bpy.colors(100),main=paste("Cluster members",main,sep="_")))
-#windows(xpos = 300, ypos = 0)
+clusplot(x$gisdata@data[names(x$data)], x$gisdata@data$cluster,main="Mean Cluster", color=TRUE, shade=TRUE,labels=2, lines=0)
+#clusplot(x$gisdata[names(x$data)], x$gisdata$cluster,main="Mean Cluster", color=TRUE, shade=TRUE,labels=2, lines=0)
 }
-#windows(xpos = 300, ypos = 0)
+else
+{
+clusplot(x$gisdata[names(x$data)], x$gisdata$cluster,main="Mean Cluster", color=TRUE, shade=TRUE,labels=2, lines=0)
 
+}
+
+i=1
+while (i<=length(x$data))
+{
+if(typeof(x$gisdata)=="S4"){
+#print("yes")
+data=x$gisdata@data
+clusplot(x$gisdata@data[names(x$data)],  x$gisdata@data[[paste("cluster",i,sep="")]],main=paste("Factor cluster",i,sep=""), color=TRUE, shade=TRUE,labels=2, lines=0)
+if(plot=="map"){
+clustermap=spplot(x$gisdata,c(paste("cluster",i,sep="")),sp.layout =list(label(x$gisdata,var=paste("cluster",i,sep=""),pos=2),label(x$gisdata,pos=3)),scales=list(draw = TRUE),col=bpy.colors(100),main=paste(main,"Cluster",i,sep=" "))
+plot(clustermap)
+
+clustermap=spplot(x$gisdata,c(paste("cluster",i,sep="")),sp.layout =list(label(x$gisdata,var=paste("cluster",i,sep=""),pos=2),label(x$gisdata,pos=3)),scales=list(draw = TRUE),col.regions=gray.colors(100),main=paste(main,"Cluster",i,sep=" "))
+plot(clustermap)
+
+}
+}
+else
+{
+clusplot(x$gisdata[names(x$data)],  x$gisdata[[paste("cluster",i,sep="")]],main=paste("Factor cluster",i,sep=""), color=TRUE, shade=TRUE,labels=2, lines=0)
+#clusplot(x$gisdata[names(x$data)], x$gisdata$cluster1,main="Factor 1 Cluster", color=TRUE, shade=TRUE,labels=2, lines=0)
+#clusplot(x$gisdata[names(x$data)], x$gisdata$cluster2,main="Factor 2 Cluster", color=TRUE, shade=TRUE,labels=2, lines=0)
+#clusplot(modall$gisdata[names(modall$data)], modall$gisdata$cluster,main="Mean Cluster", color=TRUE, shade=TRUE,labels=2, lines=0)
+
+data=x$gisdata
+
+}
+i=i+1
+}
+print("Average of mean cluster")
+print(aggregate(data[names(x$data)], by=list(data$cluster),  FUN=mean, na.rm=TRUE))
 myanovadata=data.frame(x$data)
-myanovadata$cluster=factor(fit$cluster)
+
+myanovadata$cluster=factor(x$gisdata$cluster)
+myanovadata$cluster1=factor(x$gisdata$cluster1)
+myanovadata$cluster2=factor(x$gisdata$cluster2)
+
 cluster=factor(fit$cluster)
+#clusters=c("cluster","cluster1","cluster2")
 variables=x$data
+#myanovadata=variables
 i=1
 while (i <= length(variables)) {
-cat(paste("\n\nANOVA Table", names(variables[i]),"for ",nfactors," clusters\n"))
+cat(paste("\n\nANOVA Table", names(variables[i]),"for ",nfactors," Mean clusters\n"))
 fitanova <- aov(variables[[i]]~cluster,data=myanovadata)
-#names(variables[[1]])
 print(summary(fitanova))
+cat(paste("\n\Non parametric Table", names(variables[i]),"for ",nfactors," Mean clusters\n"))
+nonpara<-kruskal.test(variables[[i]]~cluster,data=myanovadata)
+print(nonpara)
+#names(variables[[1]])
+#TukeyHSD(fitanova) # where fit comes from aov()
+i=i+1
+print("\n") 
+}
+
+print("__________________________________________________________\n")
+print("Average of cluster 1")
+print(aggregate(data[names(x$data)], by=list(data$cluster1),  FUN=mean, na.rm=TRUE))
+
+i=1
+while (i <= length(variables)) {
+cat(paste("\n\nANOVA Table", names(variables[i]),"for ",nfactors," clusters of Factor 1 \n"))
+fitanova <- aov(variables[[i]]~cluster1,data=myanovadata)
+print(summary(fitanova))
+nonpara<-kruskal.test(variables[[i]]~cluster1,data=myanovadata)
+cat(paste("\n\Non parametric Table", names(variables[i]),"for ",nfactors,"  clusters of Factor 1\n"))
+print(nonpara)
+#names(variables[[1]])
 #TukeyHSD(fitanova) # where fit comes from aov()
 i=i+1 
 }
 
+print("__________________________________________________________\n")
+print("Average cluster 2")
+print(aggregate(data[names(x$data)], by=list(data$cluster2),  FUN=mean, na.rm=TRUE))
+i=1
+while (i <= length(variables)) {
+cat(paste("\n\nANOVA Table", names(variables[i]),"for ",nfactors,"  clusters of Factor 2\n"))
+fitanova <- aov(variables[[i]]~cluster2,data=myanovadata)
+#names(variables[[1]])
+print(summary(fitanova))
+nonpara<-kruskal.test(variables[[i]]~cluster2,data=myanovadata)
+cat(paste("\n\Non parametric Table", names(variables[i]),"for ",nfactors,"  clusters of Factor 2\n"))
+print(nonpara)
+#TukeyHSD(fitanova) # where fit comes from aov()
+i=i+1 
+}
+
+
 cat("\n\n")
+
  
 #windows(xpos = 0, ypos = -300)
 d <- dist(scale(x$data), method = "euclidean") # distance matrix
@@ -956,9 +1145,24 @@ boxdata=x$data
 boxdata$cluster=fit$cluster
 i=1
 while (i<=length(labels)){
-box=boxmap(boxdata,layer="gisobject",attribute=labels[i],label=labels[i],col='black',factor="cluster",type="notch")
+box=boxmap(boxdata,layer="gisobject",attribute=labels[i],label=paste(labels[i],"[Mean]"),col='black',factor="cluster",type="notch")
 i=i+1
 }
+
+boxdata$cluster=fit1$cluster
+i=1
+while (i<=length(labels)){
+box=boxmap(boxdata,layer="gisobject",attribute=labels[i],label=paste(labels[i],"[Factor 1]"),col='black',factor="cluster",type="notch")
+i=i+1
+}
+
+boxdata$cluster=fit2$cluster
+i=1
+while (i<=length(labels)){
+box=boxmap(boxdata,layer="gisobject",attribute=labels[i],label=paste(labels[i],"[Factor 2]"),col='black',factor="cluster",type="notch")
+i=i+1
+}
+
 
 
 }
@@ -966,7 +1170,7 @@ i=i+1
 if(plot=="map"||type=="map"){
 
 
-Scale=FALSE
+Scale=TRUE
 #windows(xpos = 0, ypos = 0)
 #plot=spplot(x$gisdata,c("index"),sp.layout =list(label(x$gisdata,var="index",pos=2),label(x$gisdata,pos=3)),scales=list(draw = TRUE),col=bpy.colors(100),main=paste(main,"Index",sep=" "))
 #plot(plot)
@@ -1060,7 +1264,32 @@ plot(cluster1)
 cluster2=spplot(x$gisdata,c("cluster"),sp.layout =list(label(x$gisdata,var="cluster",pos=2),label(x$gisdata,pos=3)),scales=list(draw = Scale),col.regions=gray.colors(100),main=paste(main,"Cluster",sep=" "))
 plot(cluster2)
 
-Scale=FALSE
+#cluster
+cluster3=spplot(x$gisdata,c("cluster1"),sp.layout =list(label(x$gisdata,var="cluster1",pos=2),label(x$gisdata,pos=3)),scales=list(draw = Scale),col=bpy.colors(100),main=paste(main,"Cluster 1",sep=" "))
+plot(cluster3)
+cluster4=spplot(x$gisdata,c("cluster1"),sp.layout =list(label(x$gisdata,var="cluster1",pos=2),label(x$gisdata,pos=3)),scales=list(draw = Scale),col.regions=gray.colors(100),main=paste(main,"Cluster 1",sep=" "))
+plot(cluster4)
+
+#cluster
+cluster5=spplot(x$gisdata,c("cluster2"),sp.layout =list(label(x$gisdata,var="cluster2",pos=2),label(x$gisdata,pos=3)),scales=list(draw = Scale),col=bpy.colors(100),main=paste(main,"Cluster 2",sep=" "))
+plot(cluster5)
+cluster6=spplot(x$gisdata,c("cluster2"),sp.layout =list(label(x$gisdata,var="cluster2",pos=2),label(x$gisdata,pos=3)),scales=list(draw = Scale),col.regions=gray.colors(100),main=paste(main,"Cluster 2",sep=" "))
+plot(cluster6)
+
+#cluster
+cluster7=spplot(x$gisdata,c("cluster1","cluster2"),sp.layout =list(label(x$gisdata,pos=3)),scales=list(draw = Scale),col=bpy.colors(100),main=paste(main,"Cluster 1 and 2",sep=" "))
+plot(cluster7)
+cluster8=spplot(x$gisdata,c("cluster1","cluster2"),sp.layout =list(label(x$gisdata,pos=3)),scales=list(draw = Scale),col.regions=gray.colors(100),main=paste(main,"Cluster 1 and 2",sep=" "))
+plot(cluster8)
+
+#cluster
+cluster9=spplot(x$gisdata,c("cluster1","cluster2","cluster"),names.attr=c("Fcator cluster1","Factor cluster2","Mean cluster"),sp.layout =list(label(x$gisdata,pos=3)),scales=list(draw = Scale),col=bpy.colors(100),main=paste(main,"Cluster 1 and 2 and mean",sep=" "))
+plot(cluster9)
+cluster10=spplot(x$gisdata,c("cluster1","cluster2","cluster"),names.attr=c("Fcator cluster1","Factor cluster2","Mean cluster"),sp.layout =list(label(x$gisdata,pos=3)),scales=list(draw = Scale),col.regions=gray.colors(100),main=paste(main,"Cluster 1 and 2 and mean",sep=" "))
+plot(cluster10)
+
+
+Scale=TRUE
 #Gray scale
 #all the 3 indices
 #indices=spplot(x$gisdata,c("index","index2","meanindex1"),names.attr=c("Factor Index 1","Factor Index 2","Mean Index"),cex.main=0.4,main=("Factor and Mean Indices"),sp.layout=label(x$gisdata,pos=2),col.regions=gray.colors(100),as.table=TRUE,scales=list(draw = Scale))
@@ -1146,6 +1375,45 @@ p0<-spplot(x$gisdata,c("rank2"),cex.main=0.4,main=("Factor 2 Rank"),sp.layout=li
 plot(p1,split=c(1,1,3,1),more=TRUE)
 plot(p0,split=c(2,1,3,1),more=TRUE)
 plot(p2,split=c(3,1,3,1),more=FALSE)
+
+#cluster
+#Color scale
+#all the 3 indices
+p0<-spplot(x$gisdata,c("cluster1"),cex.main=0.4,main=("Factor 1 Cluster"),sp.layout=list(label(x$gisdata,pos=2),label(x$gisdata,c("cluster1"),pos=1)),col=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+p1<-spplot(x$gisdata,c("cluster2"),cex.main=0.4,main=("Factor 2 Cluster"),sp.layout=list(label(x$gisdata,pos=2),label(x$gisdata,c("cluster2"),pos=3)),col=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+p2<-spplot(x$gisdata,c("cluster"),cex.main=0.4,main=("Mean Cluster"),sp.layout=list(label(x$gisdata,pos=2),label(x$gisdata,c("cluster"),pos=3)),col=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+plot(p0,split=c(1,1,3,1),more=TRUE)
+plot(p1,split=c(2,1,3,1),more=TRUE)
+plot(p2,split=c(3,1,3,1),more=FALSE)
+
+#no country labels
+p0<-spplot(x$gisdata,c("cluster1"),cex.main=0.4,main=("Factor 1 Cluster"),sp.layout=list(label(x$gisdata,c("cluster1"),pos=1)),col=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+p1<-spplot(x$gisdata,c("cluster2"),cex.main=0.4,main=("Factor 2 Cluster"),sp.layout=list(label(x$gisdata,c("cluster2"),pos=3)),col=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+p2<-spplot(x$gisdata,c("cluster"),cex.main=0.4,main=("Mean Cluster"),sp.layout=list(label(x$gisdata,c("cluster"),pos=3)),col=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+plot(p0,split=c(1,1,3,1),more=TRUE)
+plot(p1,split=c(2,1,3,1),more=TRUE)
+plot(p2,split=c(3,1,3,1),more=FALSE)
+
+
+#cluster
+#gray scale
+#all the 3 indices
+p0<-spplot(x$gisdata,c("cluster1"),cex.main=0.4,main=("Factor 1 Cluster"),sp.layout=list(label(x$gisdata,pos=2),label(x$gisdata,c("cluster1"),pos=1)),col.regions=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+p1<-spplot(x$gisdata,c("cluster2"),cex.main=0.4,main=("Factor 2 Cluster"),sp.layout=list(label(x$gisdata,pos=2),label(x$gisdata,c("cluster2"),pos=3)),col.regions=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+p2<-spplot(x$gisdata,c("cluster"),cex.main=0.4,main=("Mean Cluster"),sp.layout=list(label(x$gisdata,pos=2),label(x$gisdata,c("cluster"),pos=3)),col.regions=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+plot(p0,split=c(1,1,3,1),more=TRUE)
+plot(p1,split=c(2,1,3,1),more=TRUE)
+plot(p2,split=c(3,1,3,1),more=FALSE)
+
+#no country labels
+p0<-spplot(x$gisdata,c("cluster1"),cex.main=0.4,main=("Factor 1 Cluster"),sp.layout=list(label(x$gisdata,c("cluster1"),pos=1)),col.regions=gray.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+p1<-spplot(x$gisdata,c("cluster2"),cex.main=0.4,main=("Factor 2 Cluster"),sp.layout=list(label(x$gisdata,c("cluster2"),pos=3)),col.regions=gray.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+p2<-spplot(x$gisdata,c("cluster"),cex.main=0.4,main=("Mean Cluster"),sp.layout=list(label(x$gisdata,c("cluster"),pos=3)),col.regions=gray.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+plot(p0,split=c(1,1,3,1),more=TRUE)
+plot(p1,split=c(2,1,3,1),more=TRUE)
+plot(p2,split=c(3,1,3,1),more=FALSE)
+
+
 
 
 ##########factor 1 and 2 indices
@@ -1225,6 +1493,46 @@ p1<-spplot(x$gisdata,c("rank1"),cex.main=0.4,main=("Factor 1 Rank"),sp.layout=li
 p0<-spplot(x$gisdata,c("rank2"),cex.main=0.4,main=("Factor 2 Rank"),sp.layout=list(label(x$gisdata,c("rank2"),pos=1)),col=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
 plot(p1,split=c(1,1,2,1),more=TRUE)
 plot(p0,split=c(2,1,2,1),more=FALSE)
+
+
+#clustering
+#Gray scale
+p0<-spplot(x$gisdata,c("cluster1"),cex.main=0.4,main=("Factor 1 Cluster"),sp.layout=list(label(x$gisdata,pos=2),label(x$gisdata,c("cluster1"),pos=1)),col.regions=gray.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+varindex1="index"
+p1<-spplot(x$gisdata,c("cluster2"),cex.main=0.4,main=("Factor 2 Cluster"),sp.layout=list(label(x$gisdata,pos=2),label(x$gisdata,c("cluster2"),pos=3)),col.regions=gray.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+varindex2="meanindex1"
+plot(p0,split=c(1,1,2,1),more=TRUE)
+plot(p1,split=c(2,1,2,1),more=FALSE)
+
+#no country labels
+p0<-spplot(x$gisdata,c("cluster1"),cex.main=0.4,main=("Factor 1 Cluster"),sp.layout=list(label(x$gisdata,c("cluster1"),pos=1)),col.regions=gray.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+varindex1="index"
+p1<-spplot(x$gisdata,c("cluster2"),cex.main=0.4,main=("Factor 2 Cluster"),sp.layout=list(label(x$gisdata,c("cluster2"),pos=3)),col.regions=gray.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+varindex2="meanindex1"
+plot(p0,split=c(1,1,2,1),more=TRUE)
+plot(p1,split=c(2,1,2,1),more=FALSE)
+
+#Color scale
+#all the 3 indices
+#indices=spplot(x$gisdata,c("index","index2","meanindex1"),names.attr=c("Factor Index 1","Factor Index 2","Mean Index"),cex.main=0.4,main=("Factor and Mean Indices"),sp.layout=label(x$gisdata,pos=2),col=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale))
+#plot(indices)
+
+p0<-spplot(x$gisdata,c("cluster1"),cex.main=0.4,main=("Factor 1 Cluster"),sp.layout=list(label(x$gisdata,pos=2),label(x$gisdata,c("cluster1"),pos=1)),col.regions=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+varindex1="index"
+p1<-spplot(x$gisdata,c("cluster2"),cex.main=0.4,main=("Factor 2 Cluster"),sp.layout=list(label(x$gisdata,pos=2),label(x$gisdata,c("cluster2"),pos=3)),col.regions=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+varindex2="meanindex1"
+plot(p0,split=c(1,1,2,1),more=TRUE)
+plot(p1,split=c(2,1,2,1),more=FALSE)
+
+#no country labels
+p0<-spplot(x$gisdata,c("cluster1"),cex.main=0.4,main=("Factor 1 Cluster"),sp.layout=list(label(x$gisdata,c("cluster1"),pos=1)),col.regions=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+varindex1="index"
+p1<-spplot(x$gisdata,c("cluster2"),cex.main=0.4,main=("Factor 2 Cluster"),sp.layout=list(label(x$gisdata,c("cluster2"),pos=3)),col.regions=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale),colorkey=FALSE)
+varindex2="meanindex1"
+plot(p0,split=c(1,1,2,1),more=TRUE)
+plot(p1,split=c(2,1,2,1),more=FALSE)
+
+
 
 #compare index
 ###############################################
@@ -1378,10 +1686,12 @@ Scale=FALSE
 #var4=c( "Factor1" ,"Factor2","rank1","rank2", "means","meanrank1","meanindex1","index" )
 afrogisdata2region=legend
 
-var4=c("index","meanindex1","means","rank1","meanrank1","cluster")
+var4=c("index","meanindex1","means","rank1","meanrank1","cluster","cluster1","cluster2")
 afrogisdata2region@data[var4]=round(afrogisdata2region@data[var4],digits=2)
 #afrogisdata2region@data[["cluster"]]=round(afrogisdata2region@data[["cluster"]],digits=0)
 afrogisdata2region@data[["cluster"]]=round(afrogisdata2region@data[["cluster"]],digits=0)
+afrogisdata2region@data[["cluster1"]]=round(afrogisdata2region@data[["cluster1"]],digits=0)
+afrogisdata2region@data[["cluster1"]]=round(afrogisdata2region@data[["cluster1"]],digits=0)
 
 
 i=1
@@ -1414,7 +1724,7 @@ i=i+1
 ##########regional end ends##########
 
 if(typeof(nfactors)=="S4"){
-Scale=FALSE
+Scale=TRUE
 
 
 
@@ -1445,11 +1755,15 @@ row.names(region2 )=row.names(slot(region2 , "data"))
 
 #var4=c( "Factor1" ,"Factor2","rank1","rank2", "means","meanrank1","meanindex1","index" )
 afrogisdata2region=nfactors
-var4=c("index","meanindex1","rank1","meanrank1","means","cluster")
-var4=c( "rank1","rank2", "means","meanrank1","meanindex1","index","index2","cluster" )
+var4=c("index","meanindex1","rank1","meanrank1","means","cluster","index1","index2")
+var4=c( "rank1","rank2", "means","meanrank1","meanindex1","index","index1","index2","cluster","cluster1","cluster2" )
+var4=c("means","meanindex1","cluster","index")
 afrogisdata2=x$gisdata
-var3=var4
-aggdata2 <-aggregate(x$gisdata@data[var3], by=list(afrogisdata2@data$REGION),FUN=mean, na.rm=TRUE)
+clustervars= paste("cluster",1:length(x$data),sep="")
+indexvars= paste("index",1:length(x$data),sep="")
+
+var3=c(var4,clustervars,indexvars)
+aggdata2 <-aggregate(x$gisdata@data[var3], by=list(afrogisdata2@data[["REGION"]]),FUN=mean, na.rm=TRUE)
 row.names(aggdata2)=aggdata2 [["Group.1"]]
 o <- match(region2 [["NAME"]], aggdata2 [["Group.1"]])
 regvariables2=aggdata2 [o,]
@@ -1459,9 +1773,16 @@ afrogisdata2region@data[["cluster"]]=round(afrogisdata2region@data[["cluster"]],
 afrogisdata2regionindex=afrogisdata2region
 afrogisdata2region@data[var4]=round(afrogisdata2region@data[var4],digits=2)
 afrogisdata2region@data[["cluster"]]=round(afrogisdata2region@data[["cluster"]],digits=0)
+afrogisdata2region@data[["cluster1"]]=round(afrogisdata2region@data[["cluster1"]],digits=0)
+afrogisdata2region@data[["cluster2"]]=round(afrogisdata2region@data[["cluster2"]],digits=0)
 
-print(spplot(afrogisdata2region,c("index"),cex.main=0.4,main=("Index"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("index"),pos=3)),col.regions=gray.colors(100),as.table=TRUE))
-print(spplot(afrogisdata2region,c("index"),cex.main=0.4,main=(" Index"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("index"),pos=3)),col=bpy.colors(100),as.table=TRUE))
+
+print(spplot(afrogisdata2region,c("index1"),cex.main=0.4,main=("Index 1"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("index1"),pos=3)),col.regions=gray.colors(100),as.table=TRUE))
+print(spplot(afrogisdata2region,c("index1"),cex.main=0.4,main=(" Index 1"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("index1"),pos=3)),col=bpy.colors(100),as.table=TRUE))
+
+print(spplot(afrogisdata2region,c("index2"),cex.main=0.4,main=("Index 2"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("index2"),pos=3)),col.regions=gray.colors(100),as.table=TRUE))
+print(spplot(afrogisdata2region,c("index2"),cex.main=0.4,main=(" Index 2"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("index2"),pos=3)),col=bpy.colors(100),as.table=TRUE))
+
 
 print(spplot(afrogisdata2region,c("meanindex1"),cex.main=0.4,main=("Mean Index"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("meanindex1"),pos=3)),col.regions=gray.colors(100),as.table=TRUE))
 print(spplot(afrogisdata2region,c("meanindex1"),cex.main=0.4,main=("Mean Index"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("meanindex1"),pos=3)),col=bpy.colors(100),as.table=TRUE))
@@ -1471,6 +1792,28 @@ print(spplot(afrogisdata2region,c("means"),cex.main=0.4,main=("Mean "),sp.layout
 
 print(spplot(afrogisdata2region,c("cluster"),cex.main=0.4,main=("Cluster"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("cluster"),pos=3)),col.regions=gray.colors(100),as.table=TRUE))
 print(spplot(afrogisdata2region,c("cluster"),cex.main=0.4,main=("Cluster "),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("cluster"),pos=3)),col=bpy.colors(100),as.table=TRUE))
+
+print(spplot(afrogisdata2region,c("cluster1"),cex.main=0.4,main=("Cluster1"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("cluster1"),pos=3)),col.regions=gray.colors(100),as.table=TRUE))
+print(spplot(afrogisdata2region,c("cluster1"),cex.main=0.4,main=("Cluster 1"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("cluster1"),pos=3)),col=bpy.colors(100),as.table=TRUE))
+
+print(spplot(afrogisdata2region,c("cluster2"),cex.main=0.4,main=("Cluster 2"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("cluster2"),pos=3)),col.regions=gray.colors(100),as.table=TRUE))
+print(spplot(afrogisdata2region,c("cluster2"),cex.main=0.4,main=("Cluster 2"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("cluster2"),pos=3)),col=bpy.colors(100),as.table=TRUE))
+
+i=1
+while (i<=length(x$data))
+{
+
+afrogisdata2region@data[[paste("cluster",i,sep="")]]=round(afrogisdata2region@data[[paste("cluster",i,sep="")]],digits=0)
+print(spplot(afrogisdata2region,c(paste("cluster",i,sep="")),cex.main=0.4,main=(paste("cluster",i,sep="")),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c(paste("cluster",i,sep="")),pos=3)),col.regions=gray.colors(100),as.table=TRUE),scales=list(draw = TRUE))
+print(spplot(afrogisdata2region,c(paste("cluster",i,sep="")),cex.main=0.4,main=(paste("cluster",i,sep="")),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c(paste("cluster",i,sep="")),pos=3)),col=bpy.colors(100),as.table=TRUE),scales=list(draw = TRUE))
+
+afrogisdata2region@data[[paste("index",i,sep="")]]=round(afrogisdata2region@data[[paste("index",i,sep="")]],digits=2)
+print(spplot(afrogisdata2region,c(paste("index",i,sep="")),cex.main=0.4,main=(paste("index",i,sep="")),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c(paste("index",i,sep="")),pos=3)),col.regions=gray.colors(100),as.table=TRUE),scales=list(draw = TRUE))
+print(spplot(afrogisdata2region,c(paste("index",i,sep="")),cex.main=0.4,main=(paste("index",i,sep="")),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c(paste("index",i,sep="")),pos=3)),col=bpy.colors(100),as.table=TRUE),scales=list(draw = TRUE))
+
+
+i=i+1
+}
 
 
 #print(spplot(afrogisdata2region,c("index","meanindex1","means"),names.attr=c("Factor index","Mean index","Mean"),cex.main=0.4,main=("Mean "),sp.layout=list(label(afrogisdata2region,pos=2)),col=bpy.colors(100),as.table=TRUE))
@@ -1489,10 +1832,42 @@ p2<-spplot(afrogisdata2region,c(varindex2),cex.main=0.4,main=(varindex2),sp.layo
 plot(p1,split=c(1,1,2,1),more=TRUE)
 plot(p2,split=c(2,1,2,1),more=FALSE)
 
+#index 2
+varindex1="index1"
+p1<-spplot(afrogisdata2region,c(varindex1),cex.main=0.4,main=(varindex1),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c(varindex2),pos=3)),col.regions=gray.colors(100),as.table=TRUE,scales=list(draw = Scale))
+varindex2="index2"
+p2<-spplot(afrogisdata2region,c(varindex2),cex.main=0.4,main=(varindex2),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c(varindex2),pos=3)),col.regions=gray.colors(100),as.table=TRUE,scales=list(draw = Scale))
+plot(p1,split=c(1,1,2,1),more=TRUE)
+plot(p2,split=c(2,1,2,1),more=FALSE)
+
+#col=bpy.colors(100)
+varindex1="index1"
+p1<-spplot(afrogisdata2region,c(varindex1),cex.main=0.4,main=(varindex1),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c(varindex2),pos=3)),col=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale))
+varindex2="index2"
+p2<-spplot(afrogisdata2region,c(varindex2),cex.main=0.4,main=(varindex2),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c(varindex2),pos=3)),col=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale))
+plot(p1,split=c(1,1,2,1),more=TRUE)
+plot(p2,split=c(2,1,2,1),more=FALSE)
+
+
+#cluster
+
+varindex1="cluster1"
+p1<-spplot(afrogisdata2region,c("cluster1"),cex.main=0.4,main=("cluster1"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("cluster1"),pos=3)),col.regions=gray.colors(100),as.table=TRUE,scales=list(draw = Scale))
+varindex2="meanindex1"
+p2<-spplot(afrogisdata2region,c("cluster2"),cex.main=0.4,main=("cluster2"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("cluster2"),pos=3)),col.regions=gray.colors(100),as.table=TRUE,scales=list(draw = Scale))
+plot(p1,split=c(1,1,2,1),more=TRUE)
+plot(p2,split=c(2,1,2,1),more=FALSE)
+
+varindex1="cluster2"
+p1<-spplot(afrogisdata2region,c("cluster1"),cex.main=0.4,main=("cluster1"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("cluster1"),pos=3)),col=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale))
+varindex2="meanindex1"
+p2<-spplot(afrogisdata2region,c("cluster2"),cex.main=0.4,main=("cluster2"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("cluster2"),pos=3)),col=bpy.colors(100),as.table=TRUE,scales=list(draw = Scale))
+plot(p1,split=c(1,1,2,1),more=TRUE)
+plot(p2,split=c(2,1,2,1),more=FALSE)
 
 #print individual variables
 var3=names(x$data)
-aggdata2 <-aggregate(x$gisdata@data[var3], by=list(afrogisdata2@data$REGION),FUN=mean, na.rm=TRUE)
+aggdata2 <-aggregate(x$gisdata@data[var3], by=list(afrogisdata2@data[["REGION"]]),FUN=mean, na.rm=TRUE)
 row.names(aggdata2)=aggdata2 [["Group.1"]]
 o <- match(region2 [["NAME"]], aggdata2 [["Group.1"]])
 regvariables2=aggdata2 [o,]
@@ -1501,9 +1876,9 @@ afrogisdata2region@data[var3]=round(afrogisdata2region@data[var3],digits=1)
 i=1
 while(i<=length(names(x$data))){
 
-plot=spplot(afrogisdata2region,c(names(x$data)[i]),scales=list(draw = TRUE),main=names(x$data)[i], col.regions=gray.colors(100),as.table=TRUE,sp.layout =list(label(afrogisdata2region,c(names(x$data)[i]),pos=3),label(afrogisdata2region)))
+plot=spplot(afrogisdata2region,c(names(x$data)[i]),scales=list(draw = TRUE),main=names(x$data)[i], col.regions=gray.colors(100),as.table=TRUE,sp.layout =list(label(afrogisdata2region,c(names(x$data)[i]),pos=3,cex=0.8),label(afrogisdata2region,cex=0.8)))
 plot(plot)
-plot=spplot(afrogisdata2region,c(names(x$data)[i]),scales=list(draw = TRUE), main=names(x$data)[i],col = bpy.colors(100),as.table=TRUE,sp.layout =list(label(afrogisdata2region,c(names(x$data)[i]),pos=3),label(afrogisdata2region)))
+plot=spplot(afrogisdata2region,c(names(x$data)[i]),scales=list(draw = TRUE), main=names(x$data)[i],col = bpy.colors(100),as.table=TRUE,sp.layout =list(label(afrogisdata2region,c(names(x$data)[i]),pos=3,cex=0.8),label(afrogisdata2region,cex=0.8)))
 plot(plot)
 
 i=i+1
@@ -1513,10 +1888,10 @@ plot(plot)
 plot=spplot(afrogisdata2region,c(names(x$data)),scales=list(draw = TRUE), main="Regional data",col = bpy.colors(100),as.table=TRUE)
 plot(plot)
 
-afrogisdata2region@data[var4]=afrogisdata2regionindex@data[var4]
+#afrogisdata2region@data[var4]=afrogisdata2regionindex@data[var4]
 }
 
-#anova analysis
+##################anova analysis
 if(plot=="anova"||type=="anova"||type=="nonparametric"||plot=="nonparametric" ){
 
 var2=x$data
@@ -1631,15 +2006,24 @@ afrogisdata2=x$gisdata
 var2[var4]=x$gisdata@data[var4]
 
 var2names=names(var2)
-aggdata2 <-aggregate(var2, by=list(afrogisdata2@data$REGION),FUN=mean, na.rm=TRUE)
+aggdata2 <-aggregate(var2, by=list(afrogisdata2@data[["REGION"]]),FUN=mean, na.rm=TRUE)
 row.names(aggdata2)=aggdata2 [["Group.1"]]
 
 o <- match(region2 [["NAME"]], aggdata2 [["Group.1"]])
 regvariables2=aggdata2 [o,]
 afrogisdata2region<- spCbind(region2, regvariables2)
 row.names(aggdata2)=aggdata2$Group.1
+
+#regionsnames<-row.names(aggdata2)
+mat <- data.frame(matrix("", nrow = 10, ncol=10, byrow=TRUE))
+names(mat)=row.names(aggdata2)
+row.names(mat)=row.names(aggdata2)
+
+#print(mat)
 aggdata2$Group.1<- NULL
 #names(aggdata2)
+
+
 
 #non parametric anova
 print("non parametric anova begins here")
@@ -1647,10 +2031,10 @@ print("non parametric anova begins here")
 regionsnames=row.names(aggdata2)
 i=1
 while (i<=length(var2)){
-#mod1 <- kruskal.test(afrogisdata2@data$Electricity~afrogisdata2@data$REGION)
+#mod1 <- kruskal.test(afrogisdata2@data$Electricity~afrogisdata2@data[["REGION"]])
 print("__________________________________________________________")
 print(names(var2[i]))
-print(kruskal.test(afrogisdata2@data[[names(var2[i])]]~ afrogisdata2@data$REGION))
+print(kruskal.test(afrogisdata2@data[[names(var2[i])]]~ afrogisdata2@data[["REGION"]]))
 j=1
 
 while (j<=length(regionsnames)){
@@ -1661,7 +2045,11 @@ j2=j+1
 #print(regionsnames[j])
 #print("___________________________________________________________")
 
-regiondata1 <- subset(afrogisdata2@data, REGION==regionsnames[j])
+#regiondata1 <- subset(afrogisdata2@data, REGION==regionsnames[j])
+
+regiondata1 =afrogisdata2@data[afrogisdata2@data[["REGION"]]==regionsnames[j],]
+
+
 datanames=c("diff","regions","p.value","significant")
 
 iterations = length(regionsnames)
@@ -1673,7 +2061,12 @@ while (b<=length(regionsnames)){
 #print("..........................................................")
 #print(paste(regionsnames[j],regionsnames[b],sep=" and ") )
 regions=paste(regionsnames[j],regionsnames[b],sep="-")
-regiondata2 <- subset(afrogisdata2@data, REGION==regionsnames[b])
+#regiondata2 <- subset(afrogisdata2@data, REGION==regionsnames[b])
+
+regiondata2 =afrogisdata2@data[afrogisdata2@data[["REGION"]]==regionsnames[b],]
+
+
+
 #print(wilcox.test(regiondata1[[names(var2[i])]] ,regiondata2[[names(var2[i])]]))
 model=wilcox.test(regiondata1[[names(var2[i])]] ,regiondata2[[names(var2[i])]])
 pvalue=model$p.value
@@ -1694,8 +2087,10 @@ significant="No"
 
 statistic=model$statistic
 parameter=model$parameter
+if(significant=="Yes"){
 output[b,] <- c(diff[1,],regions,pvalue,significant)
-
+mat[regionsnames[j],][regionsnames[b]]=paste(names(var2[i]),"(",diff[1,],")",sep="")
+}
 b=b+1
 }
 output <- data.frame(output)
@@ -1722,7 +2117,7 @@ while (i<=length(var2)){
 print(names(var2[i]))
 #afrogisdata2@data[is.na(afrogisdata2@data)] <-0
 #diff[is.na(diff)] <- 9999
-fit=aov((afrogisdata2@data[[names(var2[i])]])~ afrogisdata2@data$REGION)
+fit=aov((afrogisdata2@data[[names(var2[i])]])~ afrogisdata2@data[["REGION"]])
 print(summary(fit))
 tukey=TukeyHSD(fit)
 print(TukeyHSD(fit))
