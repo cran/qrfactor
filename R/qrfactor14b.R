@@ -4,7 +4,7 @@
 #library(mvoutlier)
 
 
-rq <- function (source,layer='',var=NULL,type='',p="Yes",scale="sd",t='',nf=2,m=NULL,f=NULL)
+rq <- function (source,layer='',var=NULL,type='',p="Yes",scale="sd",t='',nf=2,m=NULL,f=NULL,rotation=FALSE)
 {
 predict=p
 transform=t
@@ -24,7 +24,7 @@ if(typeof(source)=="S4"){
 object <- source
 }
 else{
-object <- readOGR(source, layer)
+object <- .qr_read(source, layer)
 }
 
 }
@@ -40,7 +40,7 @@ var=var
 }
 #print(names(object))
 #if(matchfile!=""){
-variables=slot(object[var],"data")
+variables=.qr_attr(object[var])
 #}
 #print("yes")
 }
@@ -79,16 +79,14 @@ variables=object[var]
 else{
 #check input data
 if(source==""){
-print("Full Folder path is needed:source")
-return
+stop("Full folder path is needed: 'source'", call. = FALSE)
 }
 if(layer==""){
-print("Map name is needed: layer")
-return
+stop("Map name is needed: 'layer'", call. = FALSE)
 }
 
-object <- readOGR(source, layer)
-variables=slot(object[var],"data")
+object <- .qr_read(source, layer)
+variables=.qr_attr(object[var])
 
 }
 }
@@ -120,26 +118,37 @@ table=read.csv(matchfile,header=TRUE)
 else{
 table=matchfile
 if(typeof(matchfile)=="S4"){
-table=matchfile@data
+table=.qr_attr(matchfile)
 }
 }
 
 #csv=paste(paste(source,layer,sep="/"),"csv",sep=".")
 #table=read.csv(csv,header=TRUE)
 row.names(table)=table[[match]]
-row.names(slot(gisdata2, "data"))=gisdata2[[match]]
-row.names(gisdata2)=row.names(slot(gisdata2, "data"))
+row.names(.qr_attr(gisdata2))=gisdata2[[match]]
+row.names(gisdata2)=row.names(.qr_attr(gisdata2))
 o <- match(gisdata2[[match]], table[[match]])
 variables1=table[o,]
-object<- spCbind(gisdata2, variables1)
-#print(names(object@data))
+object<- .qr_cbind(gisdata2, variables1)
+#print(names(.qr_attr(object)))
 
-row.names(slot(object, "data"))=object[[match]]
-row.names(object)=row.names(slot(object, "data"))
-variables=object@data[var]
+row.names(.qr_attr(object))=object[[match]]
+row.names(object)=row.names(.qr_attr(object))
+variables=.qr_attr(object)[var]
 }
 
-if(transform!=""){
+## Route spatial input through the Spatial*/S4 code path used below. The
+## analysis and index-writing code was written (and repaired) against sp
+## Spatial*DataFrame objects: it branches on typeof(object)=="list" vs
+## S4 and, in the S4 branch, reads/writes the attribute table via
+## .qr_attr(). rq() now reads shapefiles as sf, whose typeof is "list",
+## so without this it would take the data-frame branch and break on sf's
+## sticky geometry column. Converting once here restores the intended
+## path. Plain data-frame input is not an sf object, so this is a no-op
+## for the non-spatial case.
+object <- .qr_as_sp(object)
+
+if(any(transform!="")){
 if(scale==""||scale=="sd"){
 scale="sqrt"
 }
@@ -161,12 +170,12 @@ else
 variables=variables
 }
 
-if(scale=="log"&&transform==""){
+if(scale=="log"&&all(transform=="")){
 variables=log(variables)
 
 }
 
-if(scale=="sqrt"&&transform==""){
+if(scale=="sqrt"&&all(transform=="")){
 variables=sqrt(variables)
 }
 
@@ -248,6 +257,52 @@ colnames(R_loading) <- colnames(R_loading, do.NULL = FALSE, prefix = "Factor")
 #develop Q-mode loadings
 Q_mode_loading<-x_standard%*%eigen_vector
 colnames(Q_mode_loading) <- colnames(Q_mode_loading, do.NULL = FALSE, prefix = "Factor")
+
+## ---------------------------------------------------------------------
+## Optional orthogonal (varimax) rotation of the retained factors.
+##
+## The first min(nfactors, p) columns of the R- and Q-mode loadings are
+## rotated by the SAME orthogonal matrix, so both modes stay on one
+## common set of rotated axes. Because the scores below are derived from
+## these loadings (rscores = x_standard %*% R_loading;  qscores =
+## crossprod(x_standard, Q_mode_loading)), rotating the loadings here
+## rotates the scores, the combined loadings, the appended index columns,
+## and every biplot/map by the same transformation - no other code path
+## needs to change. The raw eigen-decomposition (eigen.vector,
+## eigen.value) and the PCA loadings are left untouched, and
+## rotation=FALSE reproduces the classical unrotated solution exactly.
+## Reference: Kaiser HF (1958) The varimax criterion for analytic
+## rotation in factor analysis. Psychometrika 23(3):187-200.
+## ---------------------------------------------------------------------
+unrotated.r.loading <- R_loading
+unrotated.q.loading <- Q_mode_loading
+rotation.used <- "none"
+rot_method <- rotation
+if (is.character(rot_method)) rot_method <- tolower(rot_method)
+do_rotate <- !(is.logical(rot_method) && !isTRUE(rot_method)) &&
+             !(is.character(rot_method) &&
+               rot_method %in% c("none", "no", "false", ""))
+rot_k <- min(nfactors, ncol(R_loading))
+if (do_rotate && rot_k >= 2) {
+  if (isTRUE(rot_method) || identical(rot_method, "varimax"))
+    rot_method <- "varimax"
+  if (!identical(rot_method, "varimax"))
+    stop("rotation must be TRUE/\"varimax\" or FALSE/\"none\"", call. = FALSE)
+  Lsub <- R_loading[, seq_len(rot_k), drop = FALSE]
+  Tmat <- varimax(Lsub, normalize = TRUE)$rotmat
+  Lrot <- Lsub %*% Tmat
+  ## keep Factor 1 the highest-variance rotated factor (varimax may reorder)
+  ord  <- order(colSums(Lrot^2), decreasing = TRUE)
+  Tmat <- Tmat[, ord, drop = FALSE]
+  Lrot <- Lrot[, ord, drop = FALSE]
+  ## give each rotated factor a stable sign: largest loading positive
+  for (j in seq_len(rot_k))
+    if (Lrot[which.max(abs(Lrot[, j])), j] < 0) Tmat[, j] <- -Tmat[, j]
+  R_loading[, seq_len(rot_k)]      <- R_loading[, seq_len(rot_k), drop = FALSE] %*% Tmat
+  Q_mode_loading[, seq_len(rot_k)] <- Q_mode_loading[, seq_len(rot_k), drop = FALSE] %*% Tmat
+  rotation.used <- "varimax"
+}
+
 #define one axis for all loadings
 all_loadings=rbind(R_loading,Q_mode_loading)
 
@@ -341,9 +396,9 @@ object$meanindex1=round(object$meanrank1/max(object$meanrank1),digits=2)
 else
 {
 object$cluster <- kmeans(scale(data), nfactors)$cluster # 
-object$means=round(rowMeans(object@data[names(data)]),digits=0)
-object$meanrank1=rank(object@data$means, ties.method = c( "first"))
-object$meanindex1=round(object@data$meanrank1/max(object@data$meanrank1),digits=2)
+object$means=round(rowMeans(.qr_attr(object)[names(data)]),digits=0)
+object$meanrank1=rank(.qr_attr(object)$means, ties.method = c( "first"))
+object$meanindex1=round(.qr_attr(object)$meanrank1/max(.qr_attr(object)$meanrank1),digits=2)
 
 }
 i=1
@@ -369,19 +424,19 @@ object[paste("cluster",i,sep="")]=kmeans(object[paste("index",i,sep="")],nfactor
 else
 {
 #print ("s4")
-object[[paste("rank",i,sep="")]]=rank(object@data[[paste("Factor",i,sep="")]], ties.method = c( "first"))
-object[[paste("index",i,sep="")]]=round(object@data[[paste("rank",i,sep="")]]/max(object[[paste("rank",i,sep="")]]),digits=2)
+object[[paste("rank",i,sep="")]]=rank(.qr_attr(object)[[paste("Factor",i,sep="")]], ties.method = c( "first"))
+object[[paste("index",i,sep="")]]=round(.qr_attr(object)[[paste("rank",i,sep="")]]/max(object[[paste("rank",i,sep="")]]),digits=2)
 
-if(cor(object@data$meanindex1,object@data[[paste("index",i,sep="")]])<0){
-object[[paste("rank",i,sep="")]]=rank(-object@data[[paste("Factor",i,sep="")]])
-object[[paste("index",i,sep="")]]=round((object@data[[paste("rank",i,sep="")]])/max(object[[paste("rank",i,sep="")]]),digits=2)
+if(cor(.qr_attr(object)$meanindex1,.qr_attr(object)[[paste("index",i,sep="")]])<0){
+object[[paste("rank",i,sep="")]]=rank(-.qr_attr(object)[[paste("Factor",i,sep="")]])
+object[[paste("index",i,sep="")]]=round((.qr_attr(object)[[paste("rank",i,sep="")]])/max(object[[paste("rank",i,sep="")]]),digits=2)
 }
 #print ("continue")
 
-object[[paste("rank",i,sep="")]]=rank(-object@data[[paste("index",i,sep="")]])
-object$meanrank1=rank(-object@data$meanindex1)
+object[[paste("rank",i,sep="")]]=rank(-.qr_attr(object)[[paste("index",i,sep="")]])
+object$meanrank1=rank(-.qr_attr(object)$meanindex1)
 
-object[[paste("cluster",i,sep="")]]=kmeans(object@data[paste("index",i,sep="")],nfactors)$cluster
+object[[paste("cluster",i,sep="")]]=kmeans(.qr_attr(object)[paste("index",i,sep="")],nfactors)$cluster
 
 }
 
@@ -395,15 +450,24 @@ object[["index"]]=object[["index1"]]
 x$loading=Q_mode_loading
 }
 
+if(rotation.used=="none"){
 variance=eigen_val/colSums(as.matrix(eigen_val))*100
 cumvariance=cumsum(eigen_val/colSums(as.matrix(eigen_val))*100)
+}else{
+## after rotation, variance is redistributed among the rotated factors;
+## per-factor variance = sum of squared loadings / total (their sum over
+## the rotated block is preserved, so cumvariance still reaches 100)
+loading_ss=colSums(R_loading^2)
+variance=loading_ss/sum(loading_ss)*100
+cumvariance=cumsum(variance)
+}
 #indices
 if(typeof(object)=="S44"){
 object$cluster <- kmeans(scale(data), nfactors)$cluster # 
 
-object$rank1=rank(object@data$Factor1, ties.method = c( "first"))
-object$rank2=rank(object@data$Factor2)
-object$means=round(rowMeans(object@data[names(data)]),digits=0)
+object$rank1=rank(.qr_attr(object)$Factor1, ties.method = c( "first"))
+object$rank2=rank(.qr_attr(object)$Factor2)
+object$means=round(rowMeans(.qr_attr(object)[names(data)]),digits=0)
 object$meanrank1=rank(object$means, ties.method = c( "first"))
 object$meanindex1=round(object$meanrank1/max(object$meanrank1),digits=2)
 sort1 <- object[order(object$rank1) , ]
@@ -414,19 +478,19 @@ object$index=round(object$rank1/max(object$rank1),digits=2)
 
 object$index1=object$index
 if(cor(object$meanindex1,object$index)<0){
-object$rank1=rank(-object@data$Factor1)
+object$rank1=rank(-.qr_attr(object)$Factor1)
 object$index=round((object$rank1)/max(object$rank1),digits=2)
 object$index1=object$index
 }
-object$meanrank1=rank(-object@data$meanindex1)
-object$rank1=rank(-object@data$index)
+object$meanrank1=rank(-.qr_attr(object)$meanindex1)
+object$rank1=rank(-.qr_attr(object)$index)
 
 object$index2=round(object$rank2/max(object$rank2),digits=2)
 if(cor(object$meanindex1,object$index2)<0){
-object$rank2=rank(-object@data$Factor2)
+object$rank2=rank(-.qr_attr(object)$Factor2)
 object$index2=round((object$rank2)/max(object$rank2),digits=2)
 }
-object$rank2=rank(-object@data$index2)
+object$rank2=rank(-.qr_attr(object)$index2)
 
 object$cluster1 <- kmeans(object$index1, nfactors)$cluster # 
 object$cluster2 <- kmeans(object$index2, nfactors)$cluster # 
@@ -496,17 +560,18 @@ diagonal.matrix=diagonal_matrix,r.loading=R_loading,q.loading=Q_mode_loading,
 rloading=R_loading,qloading=Q_mode_loading,rloadings=R_loading,qloadings=Q_mode_loading,
 combined.loadings=all_loadings,r.scores=rscores,q.scores=qscores,rscores=rscores,qscores=qscores,combined.scores=combined.scores,data1=x,
 rownames=rownames,variables=variables,mds=combined.scores,coordinates=Q_mode_loading,x.standard=x_standard,loadings=all_loadings,scores=combined.scores,
-pca.loadings=pca,pca=pca,pca.scores=pca.scores,pcascores=pca.scores,variance=variance,cumvariance=cumvariance,data=data,normal=normal,transform=transform,nfactors=nfactors)
+pca.loadings=pca,pca=pca,pca.scores=pca.scores,pcascores=pca.scores,variance=variance,cumvariance=cumvariance,data=data,normal=normal,transform=transform,nfactors=nfactors,
+rotation=rotation.used,unrotated.r.loading=unrotated.r.loading,unrotated.q.loading=unrotated.q.loading)
 
 }
 #generic function
-qrfactor<-function (source,layer='',var=NULL,type='',p="Yes",scale="sd",t='',nf=2,m=NULL,f=NULL,...) UseMethod ("qrfactor")
+qrfactor<-function (source,layer='',var=NULL,type='',p="Yes",scale="sd",t='',nf=2,m=NULL,f=NULL,rotation=FALSE,...) UseMethod ("qrfactor")
 
 #default function
-qrfactor.default<-function (source,layer='',var=NULL,type='',p="Yes",scale="sd",t='',nf=2,m=NULL,f=NULL,...)
+qrfactor.default<-function (source,layer='',var=NULL,type='',p="Yes",scale="sd",t='',nf=2,m=NULL,f=NULL,rotation=FALSE,...)
 {
 
-factor<-rq(source,layer,var,type,p,scale,t,nf,m,f,...)
+factor<-rq(source,layer,var,type,p,scale,t,nf,m,f,rotation)
 
 factor$call<-match.call()
 
@@ -580,8 +645,25 @@ print(x$cumvariance)
 plot.qrfactor<-function (x,factors=c(1,2),type="loading",plot="",
 cex="",pch=15,pos=3,main="",xlim="optimise",
 ylim="optimise",abline=TRUE,legend="topright",legendvalues=c(100),
-values=FALSE,nfactors=3,rowname=TRUE,par=c(1,2),...)
+values=FALSE,nfactors=3,rowname=TRUE,par=c(1,2),verbose=FALSE,...)
 {
+## CRAN policy: a plot method must not leave the user's graphics state
+## altered. Capture par() on entry and restore it on exit; this covers
+## every par(cex=)/par(mfrow=)/par(mar=) and layout() change made below,
+## and fires even if the function exits early or on error.
+oldpar <- par(no.readonly = TRUE)
+on.exit(par(oldpar))
+## The analysis branches (diagnose/cluster/anova/region/admin) can print
+## statistical tables (ANOVA, Kruskal-Wallis, cluster means, outliers) to
+## the console. That output is emitted only when verbose = TRUE; by
+## default the method just draws and returns invisibly, as R plot methods
+## should. vcat()/vprint() are the gated writers - the map-rendering
+## print(spplot(...)) calls are deliberately NOT routed through them.
+vcat   <- function(...) if (isTRUE(verbose)) cat(...)
+vprint <- function(z)   if (isTRUE(verbose)) print(z)
+## Analysis flavour is matched case-insensitively, so type="PCA"/"pca",
+## "CA"/"ca", "MDS"/"mds", "Coord"/"coord" all dispatch to the same branch.
+if(is.character(type) && length(type)==1) type <- tolower(type)
 #if(nfactors==""){
 #nfactors=x$nfactors
 
@@ -605,8 +687,20 @@ else
 label <- function(x,var=NULL,cex=0.8,pos=1) {
     do.call("list", ISO.sp.label(x,var,cex,pos))
 }
+## Convert the sf attribute table back to a Spatial*DataFrame so that the
+## sp-era plotting code below (coordinates(), spplot(), typeof=="S4"
+## tests) behaves as originally written. No-op for non-spatial input.
+x$gisdata <- .qr_as_sp(x$gisdata)
+## The map branches below reuse the `plot` argument as a scratch variable
+## for spplot() objects, so by the time later dispatch blocks (anova,
+## ghana/region, admin) are reached it is no longer the scalar keyword the
+## caller passed. Under R >= 4.2 an if()/|| condition of length > 1 is an
+## error (it was a silent first-element take before), so those blocks
+## crash after a map is drawn. Keep the original scalar keyword here and
+## dispatch on it.
+plotarg <- plot
 log=FALSE
-if((x$normal=="log"||x$normal=="sqrt"||x$transform!="")&&(values!="original"||values!="data")){
+if((x$normal=="log"||x$normal=="sqrt"||any(x$transform!=""))&&(values!="original"||values!="data")){
 main=paste(main,"[",x$normal,"]",sep=" ")
 log=TRUE
 }
@@ -619,7 +713,7 @@ main=main
 #graphics.off()
 par(cex="0.7",cex.lab="0.9")
 this=1
-if(cex==""){
+if(length(cex)==1 && cex==""){
 cex=0.9
 
 }
@@ -631,8 +725,8 @@ cex2=cex
 if(typeof(x$gisdata[cex])=="S4")
 
 {
-cex=slot(x$gisdata[cex],"data")
-cex1=slot(x$gisdata[cex1],"data")
+cex=.qr_attr(x$gisdata[cex])
+cex1=.qr_attr(x$gisdata[cex1])
 #cex=x$data[cex2]
 #cex1=x$data[cex2]
 
@@ -644,14 +738,14 @@ cex1=x$data[cex1]
 
 }
 
-if(values=="original"||values=="data"){
+if(length(values)==1 && (values=="original"||values=="data")){
 
 if(typeof(x$gisdata[cex2])=="S4")
 
 {
-#cex=slot(x$gisdata[cex],"data")
-cex=slot(x$gisdata[cex2],"data")
-cex1=slot(x$gisdata[cex2],"data")
+#cex=.qr_attr(x$gisdata[cex])
+cex=.qr_attr(x$gisdata[cex2])
+cex1=.qr_attr(x$gisdata[cex2])
 
 }
 else
@@ -684,13 +778,13 @@ this=1
 
 if(typeof(values)!="logical"){
 
-if(values=="original"||values=="data"){
+if(length(values)==1 && (values=="original"||values=="data")){
 
 if(typeof(x$gisdata[cex2])=="S4")
 
 {
-#cex=slot(x$gisdata[cex],"data")
-values=slot(x$gisdata[cex2],"data")
+#cex=.qr_attr(x$gisdata[cex])
+values=.qr_attr(x$gisdata[cex2])
 
 }
 else
@@ -724,12 +818,12 @@ if(typeof(rowname)!="logical"){
 if(typeof(x$gisdata)=="S4")
 
 {
-#rowname=slot(x$gisdata[rowname],"data")
+#rowname=.qr_attr(x$gisdata[rowname])
 #row.names(x$q.loading)=x$data[rowname]
 row.names(x$data)=x$gisdata[[rowname]]
 row.names(x$q.loading)=x$gisdata[[rowname]]
-row.names(slot(x$gisdata, "data"))=x$gisdata[[rowname]]
-row.names(x$gisdata)=row.names(slot(x$gisdata, "data"))
+row.names(.qr_attr(x$gisdata))=x$gisdata[[rowname]]
+row.names(x$gisdata)=row.names(.qr_attr(x$gisdata))
 
 
 }
@@ -754,14 +848,14 @@ if(typeof(abline)!="logical"){
 b1=abline[1]
 b2=abline[2]
 
-if(abline=="shift"||abline=="Shift"||abline=="move"){
+if(length(abline)==1 && (abline=="shift"||abline=="Shift"||abline=="move")){
 row=x$r.loading
 b=row[cexa[[1]],]
 b1= b[factors[1]]
 b2= b[factors[2]]
 }
 }
-if(xlim=="yes"||xlim=="r"){
+if(length(xlim)==1 && (xlim=="yes"||xlim=="r")){
 rmin1=min(x$r.loading[,factors[1]])
 qmin1=min(x$q.loading[,factors[1]])
 rmax1=max(x$r.loading[,factors[1]])
@@ -784,18 +878,18 @@ ylim=c(ymin,ymax)
 #ylim=c(min(x$r.loading[,factors[2]]),max(x$r.loading[,factors[2]]))
 }
 
-if(ylim=="yes"||ylim=="q"){
+if(length(ylim)==1 && (ylim=="yes"||ylim=="q")){
 xlim=c(min(x$q.loading[,factors[1]]),max(x$q.loading[,factors[1]]))
 ylim=c(min(x$q.loading[,factors[2]]),max(x$q.loading[,factors[2]]))
 }
-if(xlim=="rq"||xlim=="qr"){
+if(length(xlim)==1 && (xlim=="rq"||xlim=="qr")){
 xlim=c(min(x$r.loading[,factors[1]]),max(x$r.loading[,factors[1]]))
 ylim=c(min(x$r.loading[,factors[2]]),max(x$q.loading[,factors[2]]))
 
 
 }
 
-if(xlim=="optimise"||ylim=="optimise"){
+if((length(xlim)==1 && xlim=="optimise")||(length(ylim)==1 && ylim=="optimise")){
 
 rmin1=min(x$r.loading[,factors[1]])
 qmin1=min(x$q.loading[,factors[1]])
@@ -814,8 +908,8 @@ xmax=max(rmax1,qmax1)
 ymin=min(rmin2,qmin2)
 ymax=max(rmax2,qmax2)
 
-xlim=c(xmin-margin,xmax+margin)
-ylim=c(ymin-margin,ymax+margin)
+if(length(xlim)==1 && xlim=="optimise") xlim=c(xmin-margin,xmax+margin)
+if(length(ylim)==1 && ylim=="optimise") ylim=c(ymin-margin,ymax+margin)
 }
 
 xlab=paste("Factor ",factors[1],"(",round(x$variance[factors[1]],2),"%)")
@@ -895,13 +989,22 @@ text(x$pca.loadings[,factors[1]],x$pca.loadings[,factors[2]], row.names( x$pca.l
 }else{
 
 if(type=="cluster"||type=="compare"||plot=="cluster"||plot=="compare"){
-if(par==""){
+if(length(par)==1 && par==""){
 par=c(1,2)
 }
 par(mfrow=par)
 }
 
+## Honour plot="r" (R-mode loadings only) and plot="q" (Q-mode only); the
+## default ("" / "qr") draws both. plotarg is the preserved scalar keyword,
+## since the map branches reuse `plot` as a scratch variable further down.
+drawq <- !(length(plotarg)==1 && plotarg=="r")
+drawr <- !(length(plotarg)==1 && plotarg=="q")
+if(drawq){
 plot(x$q.loading[,factors[1]],x$q.loading[,factors[2]],xlab=xlab,ylab=ylab, main=main,cex=cex[[1]],pch=pch,xlim=xlim,ylim=ylim,...)
+}else{
+plot(x$r.loading[,factors[1]],x$r.loading[,factors[2]],xlab=xlab,ylab=ylab, main=main,cex=cex[[1]],pch=pch,xlim=xlim,ylim=ylim,...)
+}
 
 if(typeof(abline)!="logical"){
 abline(v=b1)
@@ -910,7 +1013,7 @@ abline(h=b2)
 }
 else
 {
-if(abline==TRUE){
+if(length(abline)==1 && abline==TRUE){
 abline(v=0)
 abline(h=0)
 }
@@ -939,14 +1042,16 @@ i=i+1
 }
 
 
-text(x$q.loading[,factors[1]],x$q.loading[,factors[2]], row.names( x$q.loading), cex=0.9, pos=pos,col="blue",new=TRUE)   
+if(drawq){
+text(x$q.loading[,factors[1]],x$q.loading[,factors[2]], row.names( x$q.loading), cex=0.9, pos=pos,col="blue",new=TRUE)
+}
 
 
 if(typeof(values)!="logical"){
 text(x$q.loading[,factors[1]],x$q.loading[,factors[2]], labels=(values[[1]]), cex=0.9, pos=1,col="blue")  
 }
 else{
-if(values==TRUE){
+if(length(values)==1 && values==TRUE){
 values=cex1[[1]]
 if(typeof(values[[1]][1])=="double"){
 if(log==TRUE){
@@ -965,8 +1070,10 @@ text(x$q.loading[,factors[1]],x$q.loading[,factors[2]], labels=values, cex=0.9, 
 
 }
 
+if(drawr){
 points(x$r.loading[,factors[1]],x$r.loading[,factors[2]],pch=1, main="R- and Q- Mode FA")
-text(x$r.loading[,factors[1]],x$r.loading[,factors[2]], row.names( x$r.loading), cex=1.1, pos=3, col="black",font=4)  
+text(x$r.loading[,factors[1]],x$r.loading[,factors[2]], row.names( x$r.loading), cex=1.1, pos=3, col="black",font=4)
+}
 
 if(this>1){
 legend=legend(legend, legend = round(legValsAvg,0), pch = pch, pt.cex = legVals,bty = "n", title = paste("Legend",cexa,sep=":"))
@@ -976,7 +1083,7 @@ legend=legend(legend, legend = round(legValsAvg,0), pch = pch, pt.cex = legVals,
 if(type=="diagnose"||plot=="diagnose"){
 labels=names(x$data)
 
-if(par==""){
+if(length(par)==1 && par==""){
 variableslen=round(length(labels)/2,0)
 par(mfrow=c(2,variableslen))
 if(length(labels)>6){
@@ -990,12 +1097,17 @@ par(mfrow=c(par[1],par[2]))
 }
 i=1
 while (i<=length(labels)){
-hist=histmap(x$data,layer="gisobject",attribute=labels[i],label=labels[i],col='blue',type='normal')
+hist=.qr_histmap(x$data,layer="gisobject",attribute=labels[i],label=labels[i],col='blue',type='normal')
 i=i+1
 }
  #windows(xpos = 0, ypos = 0)
 
-# Graphical Assessment of Multivariate Normality
+# Graphical Assessment of Multivariate Normality.
+# Wrapped in try(): the Mahalanobis distance and mvoutlier::aq.plot both
+# invert the covariance matrix, which fails when variables are collinear
+# (a singular matrix). The histograms above still render; only this
+# multivariate-normality panel is skipped, with a clear message.
+mvn <- try({
 xx <- as.matrix(x$data) # n x p numeric matrix
 center <- colMeans(xx) # centroid
 n <- nrow(xx); p <- ncol(xx); cov <- cov(xx);
@@ -1003,12 +1115,18 @@ d <- mahalanobis(xx,center,cov) # distances
 qqplot(qchisq(ppoints(n),df=p),d,
   main=main,
   ylab="Mahalanobis D2")
-abline(a=0,b=1) 
+abline(a=0,b=1)
 
  #windows(xpos = 0, ypos = 0)
 
 outliers <-aq.plot(x$data)
-print(outliers)
+vprint(outliers)
+}, silent=TRUE)
+if(inherits(mvn,"try-error")){
+warning("Multivariate-normality / outlier diagnostics skipped: the ",
+        "covariance matrix is singular (collinear variables). Drop or ",
+        "combine near-duplicate variables.", call.=FALSE)
+}
 
 #print(mshapiro.test(x$data) )
 
@@ -1023,7 +1141,7 @@ fit2 <- kmeans(x$gisdata$index2, nfactors,...) #
 
 if(typeof(x$gisdata)=="S4"){
 
-clusplot(x$gisdata@data[names(x$data)], x$gisdata@data$cluster,main="Mean Cluster", color=TRUE, shade=TRUE,labels=2, lines=0)
+clusplot(.qr_attr(x$gisdata)[names(x$data)], .qr_attr(x$gisdata)$cluster,main="Mean Cluster", color=TRUE, shade=TRUE,labels=2, lines=0)
 #clusplot(x$gisdata[names(x$data)], x$gisdata$cluster,main="Mean Cluster", color=TRUE, shade=TRUE,labels=2, lines=0)
 }
 else
@@ -1037,8 +1155,8 @@ while (i<=length(x$data))
 {
 if(typeof(x$gisdata)=="S4"){
 #print("yes")
-data=x$gisdata@data
-clusplot(x$gisdata@data[names(x$data)],  x$gisdata@data[[paste("cluster",i,sep="")]],main=paste("Factor cluster",i,sep=""), color=TRUE, shade=TRUE,labels=2, lines=0)
+data=.qr_attr(x$gisdata)
+clusplot(.qr_attr(x$gisdata)[names(x$data)],  .qr_attr(x$gisdata)[[paste("cluster",i,sep="")]],main=paste("Factor cluster",i,sep=""), color=TRUE, shade=TRUE,labels=2, lines=0)
 if(plot=="map"){
 clustermap=spplot(x$gisdata,c(paste("cluster",i,sep="")),sp.layout =list(label(x$gisdata,var=paste("cluster",i,sep=""),pos=2),label(x$gisdata,pos=3)),scales=list(draw = TRUE),col=bpy.colors(100),main=paste(main,"Cluster",i,sep=" "))
 plot(clustermap)
@@ -1060,8 +1178,8 @@ data=x$gisdata
 }
 i=i+1
 }
-print("Average of mean cluster")
-print(aggregate(data[names(x$data)], by=list(data$cluster),  FUN=mean, na.rm=TRUE))
+vprint("Average of mean cluster")
+vprint(aggregate(data[names(x$data)], by=list(data$cluster),  FUN=mean, na.rm=TRUE))
 myanovadata=data.frame(x$data)
 
 myanovadata$cluster=factor(x$gisdata$cluster)
@@ -1074,53 +1192,53 @@ variables=x$data
 #myanovadata=variables
 i=1
 while (i <= length(variables)) {
-cat(paste("\n\n ANOVA Table", names(variables[i]),"for ",nfactors," Mean clusters\n"))
+vcat(paste("\n\n ANOVA Table", names(variables[i]),"for ",nfactors," Mean clusters\n"))
 fitanova <- aov(variables[[i]]~cluster,data=myanovadata)
-print(summary(fitanova))
-cat(paste("\n\n Non parametric Table", names(variables[i]),"for ",nfactors," Mean clusters\n"))
+vprint(summary(fitanova))
+vcat(paste("\n\n Non parametric Table", names(variables[i]),"for ",nfactors," Mean clusters\n"))
 nonpara<-kruskal.test(variables[[i]]~cluster,data=myanovadata)
-print(nonpara)
+vprint(nonpara)
 #names(variables[[1]])
 #TukeyHSD(fitanova) # where fit comes from aov()
 i=i+1
-print("\n") 
+vcat("\n")
 }
 
-print("__________________________________________________________\n")
-print("Average of cluster 1")
-print(aggregate(data[names(x$data)], by=list(data$cluster1),  FUN=mean, na.rm=TRUE))
+vcat("__________________________________________________________\n")
+vcat("Average of cluster 1\n")
+vprint(aggregate(data[names(x$data)], by=list(data$cluster1),  FUN=mean, na.rm=TRUE))
 
 i=1
 while (i <= length(variables)) {
-cat(paste("\n\nANOVA Table", names(variables[i]),"for ",nfactors," clusters of Factor 1 \n"))
+vcat(paste("\n\nANOVA Table", names(variables[i]),"for ",nfactors," clusters of Factor 1 \n"))
 fitanova <- aov(variables[[i]]~cluster1,data=myanovadata)
-print(summary(fitanova))
+vprint(summary(fitanova))
 nonpara<-kruskal.test(variables[[i]]~cluster1,data=myanovadata)
-cat(paste("\n\n Non parametric Table", names(variables[i]),"for ",nfactors,"  clusters of Factor 1\n"))
-print(nonpara)
+vcat(paste("\n\n Non parametric Table", names(variables[i]),"for ",nfactors,"  clusters of Factor 1\n"))
+vprint(nonpara)
 #names(variables[[1]])
 #TukeyHSD(fitanova) # where fit comes from aov()
-i=i+1 
+i=i+1
 }
 
-print("__________________________________________________________\n")
-print("Average cluster 2")
-print(aggregate(data[names(x$data)], by=list(data$cluster2),  FUN=mean, na.rm=TRUE))
+vcat("__________________________________________________________\n")
+vcat("Average cluster 2\n")
+vprint(aggregate(data[names(x$data)], by=list(data$cluster2),  FUN=mean, na.rm=TRUE))
 i=1
 while (i <= length(variables)) {
-cat(paste("\n\n ANOVA Table", names(variables[i]),"for ",nfactors,"  clusters of Factor 2\n"))
+vcat(paste("\n\n ANOVA Table", names(variables[i]),"for ",nfactors,"  clusters of Factor 2\n"))
 fitanova <- aov(variables[[i]]~cluster2,data=myanovadata)
 #names(variables[[1]])
-print(summary(fitanova))
+vprint(summary(fitanova))
 nonpara<-kruskal.test(variables[[i]]~cluster2,data=myanovadata)
-cat(paste("\n\n Non parametric Table", names(variables[i]),"for ",nfactors,"  clusters of Factor 2\n"))
-print(nonpara)
+vcat(paste("\n\n Non parametric Table", names(variables[i]),"for ",nfactors,"  clusters of Factor 2\n"))
+vprint(nonpara)
 #TukeyHSD(fitanova) # where fit comes from aov()
-i=i+1 
+i=i+1
 }
 
 
-cat("\n\n")
+vcat("\n\n")
 
  
 #windows(xpos = 0, ypos = -300)
@@ -1136,7 +1254,7 @@ pvrect(fit, alpha=.95)
 
 fit <- kmeans(scale(x$data), nfactors,...) # 
 labels=names(x$data)
-if(par==""){
+if(length(par)==1 && par==""){
 variableslen=round(length(labels)/2,0)
 par(mfrow=c(2,variableslen))
 if(length(labels)>6){
@@ -1151,21 +1269,21 @@ boxdata=x$data
 boxdata$cluster=fit$cluster
 i=1
 while (i<=length(labels)){
-box=boxmap(boxdata,layer="gisobject",attribute=labels[i],label=paste(labels[i],"[Mean]"),col='black',factor="cluster",type="notch")
+box=.qr_boxmap(boxdata,layer="gisobject",attribute=labels[i],label=paste(labels[i],"[Mean]"),col='black',factor="cluster",type="notch")
 i=i+1
 }
 
 boxdata$cluster=fit1$cluster
 i=1
 while (i<=length(labels)){
-box=boxmap(boxdata,layer="gisobject",attribute=labels[i],label=paste(labels[i],"[Factor 1]"),col='black',factor="cluster",type="notch")
+box=.qr_boxmap(boxdata,layer="gisobject",attribute=labels[i],label=paste(labels[i],"[Factor 1]"),col='black',factor="cluster",type="notch")
 i=i+1
 }
 
 boxdata$cluster=fit2$cluster
 i=1
 while (i<=length(labels)){
-box=boxmap(boxdata,layer="gisobject",attribute=labels[i],label=paste(labels[i],"[Factor 2]"),col='black',factor="cluster",type="notch")
+box=.qr_boxmap(boxdata,layer="gisobject",attribute=labels[i],label=paste(labels[i],"[Factor 2]"),col='black',factor="cluster",type="notch")
 i=i+1
 }
 
@@ -1191,7 +1309,7 @@ plot(plot)
 #windows()
 #scale the data
 scalex=x
-scalex$gisdata@data[c(names(x$data))]=scale(scalex$gisdata@data[c(names(x$data))],center=FALSE,scale=TRUE)
+.qr_attr(scalex$gisdata)[c(names(x$data))]=scale(.qr_attr(scalex$gisdata)[c(names(x$data))],center=FALSE,scale=TRUE)
 plot=spplot(scalex$gisdata,c(names(scalex$data)),scales=list(draw = TRUE), main="Scaled variables",col.regions=gray.colors(100),as.table=TRUE)
 plot(plot)
 
@@ -1693,11 +1811,11 @@ Scale=FALSE
 afrogisdata2region=legend
 
 var4=c("index","meanindex1","means","rank1","meanrank1","cluster","cluster1","cluster2")
-afrogisdata2region@data[var4]=round(afrogisdata2region@data[var4],digits=2)
-#afrogisdata2region@data[["cluster"]]=round(afrogisdata2region@data[["cluster"]],digits=0)
-afrogisdata2region@data[["cluster"]]=round(afrogisdata2region@data[["cluster"]],digits=0)
-afrogisdata2region@data[["cluster1"]]=round(afrogisdata2region@data[["cluster1"]],digits=0)
-afrogisdata2region@data[["cluster1"]]=round(afrogisdata2region@data[["cluster1"]],digits=0)
+.qr_attr(afrogisdata2region)[var4]=round(.qr_attr(afrogisdata2region)[var4],digits=2)
+#.qr_attr(afrogisdata2region)[["cluster"]]=round(.qr_attr(afrogisdata2region)[["cluster"]],digits=0)
+.qr_attr(afrogisdata2region)[["cluster"]]=round(.qr_attr(afrogisdata2region)[["cluster"]],digits=0)
+.qr_attr(afrogisdata2region)[["cluster1"]]=round(.qr_attr(afrogisdata2region)[["cluster1"]],digits=0)
+.qr_attr(afrogisdata2region)[["cluster1"]]=round(.qr_attr(afrogisdata2region)[["cluster1"]],digits=0)
 
 
 i=1
@@ -1735,7 +1853,7 @@ Scale=TRUE
 
 
 #here
-if(par==""){
+if(length(par)==1 && par==""){
 par(mfrow=c(1,2))
 
 }else
@@ -1754,10 +1872,10 @@ cexvar=0.9
 source<- system.file("external","Ghana", package = "qrfactor")
 
 layerregion2="Regions"
-region2 <- na.omit(readOGR(source, layerregion2))
+region2 <- na.omit(.qr_read(source, layerregion2))
 
-row.names(slot(region2 , "data"))=region2 [["NAME"]]
-row.names(region2 )=row.names(slot(region2 , "data"))
+row.names(.qr_attr(region2))=region2 [["NAME"]]
+row.names(region2 )=row.names(.qr_attr(region2))
 
 #var4=c( "Factor1" ,"Factor2","rank1","rank2", "means","meanrank1","meanindex1","index" )
 afrogisdata2region=nfactors
@@ -1769,18 +1887,18 @@ clustervars= paste("cluster",1:length(x$data),sep="")
 indexvars= paste("index",1:length(x$data),sep="")
 
 var3=c(var4,clustervars,indexvars)
-aggdata2 <-aggregate(x$gisdata@data[var3], by=list(afrogisdata2@data[["REGION"]]),FUN=mean, na.rm=TRUE)
+aggdata2 <-aggregate(.qr_attr(x$gisdata)[var3], by=list(.qr_attr(afrogisdata2)[["REGION"]]),FUN=mean, na.rm=TRUE)
 row.names(aggdata2)=aggdata2 [["Group.1"]]
 o <- match(region2 [["NAME"]], aggdata2 [["Group.1"]])
 regvariables2=aggdata2 [o,]
-afrogisdata2region<- spCbind(region2, regvariables2)
-afrogisdata2region@data[var3]=round(afrogisdata2region@data[var3],digits=2)
-afrogisdata2region@data[["cluster"]]=round(afrogisdata2region@data[["cluster"]],digits=0)
+afrogisdata2region<- .qr_cbind(region2, regvariables2)
+.qr_attr(afrogisdata2region)[var3]=round(.qr_attr(afrogisdata2region)[var3],digits=2)
+.qr_attr(afrogisdata2region)[["cluster"]]=round(.qr_attr(afrogisdata2region)[["cluster"]],digits=0)
 afrogisdata2regionindex=afrogisdata2region
-afrogisdata2region@data[var4]=round(afrogisdata2region@data[var4],digits=2)
-afrogisdata2region@data[["cluster"]]=round(afrogisdata2region@data[["cluster"]],digits=0)
-afrogisdata2region@data[["cluster1"]]=round(afrogisdata2region@data[["cluster1"]],digits=0)
-afrogisdata2region@data[["cluster2"]]=round(afrogisdata2region@data[["cluster2"]],digits=0)
+.qr_attr(afrogisdata2region)[var4]=round(.qr_attr(afrogisdata2region)[var4],digits=2)
+.qr_attr(afrogisdata2region)[["cluster"]]=round(.qr_attr(afrogisdata2region)[["cluster"]],digits=0)
+.qr_attr(afrogisdata2region)[["cluster1"]]=round(.qr_attr(afrogisdata2region)[["cluster1"]],digits=0)
+.qr_attr(afrogisdata2region)[["cluster2"]]=round(.qr_attr(afrogisdata2region)[["cluster2"]],digits=0)
 
 
 print(spplot(afrogisdata2region,c("index1"),cex.main=0.4,main=("Index 1"),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c("index1"),pos=3)),col.regions=gray.colors(100),as.table=TRUE))
@@ -1809,11 +1927,11 @@ i=1
 while (i<=length(x$data))
 {
 
-afrogisdata2region@data[[paste("cluster",i,sep="")]]=round(afrogisdata2region@data[[paste("cluster",i,sep="")]],digits=0)
+.qr_attr(afrogisdata2region)[[paste("cluster",i,sep="")]]=round(.qr_attr(afrogisdata2region)[[paste("cluster",i,sep="")]],digits=0)
 print(spplot(afrogisdata2region,c(paste("cluster",i,sep="")),cex.main=0.4,main=(paste("cluster",i,sep="")),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c(paste("cluster",i,sep="")),pos=3)),col.regions=gray.colors(100),as.table=TRUE),scales=list(draw = TRUE))
 print(spplot(afrogisdata2region,c(paste("cluster",i,sep="")),cex.main=0.4,main=(paste("cluster",i,sep="")),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c(paste("cluster",i,sep="")),pos=3)),col=bpy.colors(100),as.table=TRUE),scales=list(draw = TRUE))
 
-afrogisdata2region@data[[paste("index",i,sep="")]]=round(afrogisdata2region@data[[paste("index",i,sep="")]],digits=2)
+.qr_attr(afrogisdata2region)[[paste("index",i,sep="")]]=round(.qr_attr(afrogisdata2region)[[paste("index",i,sep="")]],digits=2)
 print(spplot(afrogisdata2region,c(paste("index",i,sep="")),cex.main=0.4,main=(paste("index",i,sep="")),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c(paste("index",i,sep="")),pos=3)),col.regions=gray.colors(100),as.table=TRUE),scales=list(draw = TRUE))
 print(spplot(afrogisdata2region,c(paste("index",i,sep="")),cex.main=0.4,main=(paste("index",i,sep="")),sp.layout=list(label(afrogisdata2region,pos=2),label(afrogisdata2region,c(paste("index",i,sep="")),pos=3)),col=bpy.colors(100),as.table=TRUE),scales=list(draw = TRUE))
 
@@ -1873,12 +1991,12 @@ plot(p2,split=c(2,1,2,1),more=FALSE)
 
 #print individual variables
 var3=names(x$data)
-aggdata2 <-aggregate(x$gisdata@data[var3], by=list(afrogisdata2@data[["REGION"]]),FUN=mean, na.rm=TRUE)
+aggdata2 <-aggregate(.qr_attr(x$gisdata)[var3], by=list(.qr_attr(afrogisdata2)[["REGION"]]),FUN=mean, na.rm=TRUE)
 row.names(aggdata2)=aggdata2 [["Group.1"]]
 o <- match(region2 [["NAME"]], aggdata2 [["Group.1"]])
 regvariables2=aggdata2 [o,]
-afrogisdata2region<- spCbind(region2, regvariables2)
-afrogisdata2region@data[var3]=round(afrogisdata2region@data[var3],digits=1)
+afrogisdata2region<- .qr_cbind(region2, regvariables2)
+.qr_attr(afrogisdata2region)[var3]=round(.qr_attr(afrogisdata2region)[var3],digits=1)
 i=1
 while(i<=length(names(x$data))){
 
@@ -1894,11 +2012,11 @@ plot(plot)
 plot=spplot(afrogisdata2region,c(names(x$data)),scales=list(draw = TRUE), main="Regional data",col = bpy.colors(100),as.table=TRUE)
 plot(plot)
 
-#afrogisdata2region@data[var4]=afrogisdata2regionindex@data[var4]
+#.qr_attr(afrogisdata2region)[var4]=.qr_attr(afrogisdata2regionindex)[var4]
 }
 
 ##################anova analysis
-if(plot=="anova"||type=="anova"||type=="nonparametric"||plot=="nonparametric" ){
+if(plotarg=="anova"||type=="anova"||type=="nonparametric"||plotarg=="nonparametric" ){
 
 var2=x$data
 var4=c("index","meanindex1","means","rank1","meanrank1","cluster")
@@ -1906,14 +2024,14 @@ var4=c("index","meanindex1","means","rank1","meanrank1","cluster")
 #var2=cbind(var2,var4)
 
 #if(typeof(x$gisdata)=="S4"){
-#var2=x$gisdata@data
+#var2=.qr_attr(x$gisdata)
 #modmod2004_2012=x
-# var2=modmod2004_2012$gisdata@data[names(modmod2004_2012$data)]
+# var2=.qr_attr(modmod2004_2012$gisdata)[names(modmod2004_2012$data)]
 #var4=c("index","meanindex1","means","rank1","meanrank1","cluster")
-#var4=modmod2004_2012@data[var4]
+#var4=.qr_attr(modmod2004_2012)[var4]
 #var2=cbind(var2,var4)
 #}
-print("nonparametric variable")
+vcat("nonparametric variable\n")
 i=1
 while (i<=length(var2)){
 
@@ -1951,15 +2069,15 @@ names(output)=datanames
 output$variablename=sub("_", "",output$variablename)
 row.names(output)=output$variablename
 output$variablename=NULL
-print(output)
+vprint(output)
 }
 
-print("Anova")
+vcat("Anova\n")
 afrogisdata2=x$data
 
 if(typeof(x$gisdata)=="S4"){
 
-afrogisdata2=x$gisdata@data
+afrogisdata2=.qr_attr(x$gisdata)
 }
 i=1
 while (i<=length(var2)){
@@ -1967,7 +2085,7 @@ j=1
 while(j<=length(var2)){
 #fit=aov(var2[i] ,var2[j])
 variablename=paste(names(var2[i]),names(var2[j]),sep="-")
-print(variablename)
+vprint(variablename)
 data1=afrogisdata2[names(var2[i])]
 data1$group=as.factor(names(var2[i]))
 data2=afrogisdata2[names(var2[j])]
@@ -1975,7 +2093,7 @@ data2$group=as.factor(paste(names(var2[j]),"b"))
 names(data2)<-names(data1)
 data=rbind(data1,data2)
 fit=aov(formula=data[[1]]~data[[2]], data = data)
-print(summary(fit))
+vprint(summary(fit))
 #tukey=TukeyHSD(fit)
 #print(TukeyHSD(fit))
 
@@ -1986,15 +2104,15 @@ i=i+1
 
 }
 
-if(plot=="ghana"||type=="ghana"||plot=="region"||type=="region"){
+if(plotarg=="ghana"||type=="ghana"||plotarg=="region"||type=="region"){
 #source<-"C:/Users/george/Documents/Rpackages/multigis2/inst/external/Ghana"
 source<- system.file("external","Ghana", package = "qrfactor")
 
 layerregion2="Regions"
-region2 <- na.omit(readOGR(source, layerregion2))
+region2 <- na.omit(.qr_read(source, layerregion2))
 
-row.names(slot(region2 , "data"))=region2 [["NAME"]]
-row.names(region2 )=row.names(slot(region2 , "data"))
+row.names(.qr_attr(region2))=region2 [["NAME"]]
+row.names(region2 )=row.names(.qr_attr(region2))
 
 var2=x$data
 afrogisdata2=x$data
@@ -2006,18 +2124,18 @@ afrogisdata2=x$gisdata
 }
 afrogisdata2=x$gisdata
 
-#afrogisdata2@data[var4]=x$gisdata@data[var4]
+#.qr_attr(afrogisdata2)[var4]=.qr_attr(x$gisdata)[var4]
 #print(names(afrogisdata2))
 
-var2[var4]=x$gisdata@data[var4]
+var2[var4]=.qr_attr(x$gisdata)[var4]
 
 var2names=names(var2)
-aggdata2 <-aggregate(var2, by=list(afrogisdata2@data[["REGION"]]),FUN=mean, na.rm=TRUE)
+aggdata2 <-aggregate(var2, by=list(.qr_attr(afrogisdata2)[["REGION"]]),FUN=mean, na.rm=TRUE)
 row.names(aggdata2)=aggdata2 [["Group.1"]]
 
 o <- match(region2 [["NAME"]], aggdata2 [["Group.1"]])
 regvariables2=aggdata2 [o,]
-afrogisdata2region<- spCbind(region2, regvariables2)
+afrogisdata2region<- .qr_cbind(region2, regvariables2)
 row.names(aggdata2)=aggdata2$Group.1
 
 mat <- data.frame(matrix(1:10, nrow = 10, ncol=10, byrow=TRUE))
@@ -2028,15 +2146,15 @@ aggdata2$Group.1<- NULL
 #names(aggdata2)
 
 #non parametric anova
-print("non parametric anova begins here")
+vcat("non parametric anova begins here\n")
 #afrogisdata2=afrogisdata2004_2012
 regionsnames=row.names(aggdata2)
 i=1
 while (i<=length(var2)){
-#mod1 <- kruskal.test(afrogisdata2@data$Electricity~afrogisdata2@data$REGION)
-print("__________________________________________________________")
-print(names(var2[i]))
-print(kruskal.test(afrogisdata2@data[[names(var2[i])]]~ afrogisdata2@data[["REGION"]]))
+#mod1 <- kruskal.test(.qr_attr(afrogisdata2)$Electricity~.qr_attr(afrogisdata2)$REGION)
+vcat("__________________________________________________________\n")
+vprint(names(var2[i]))
+vprint(kruskal.test(.qr_attr(afrogisdata2)[[names(var2[i])]]~ .qr_attr(afrogisdata2)[["REGION"]]))
 j=1
 
 while (j<=length(regionsnames)){
@@ -2047,7 +2165,7 @@ j2=j+1
 #print(regionsnames[j])
 #print("___________________________________________________________")
 
-regiondata1 =afrogisdata2@data[afrogisdata2@data[["REGION"]]==regionsnames[j],]
+regiondata1 =.qr_attr(afrogisdata2)[.qr_attr(afrogisdata2)[["REGION"]]==regionsnames[j],]
 datanames=c("diff","regions","p.value","significant")
 
 iterations = length(regionsnames)
@@ -2059,8 +2177,8 @@ while (b<=length(regionsnames)){
 #print("..........................................................")
 #print(paste(regionsnames[j],regionsnames[b],sep=" and ") )
 regions=paste(regionsnames[j],regionsnames[b],sep="-")
-#regiondata2 <- subset(afrogisdata2@data, REGION==regionsnames[b])
-regiondata2 =afrogisdata2@data[afrogisdata2@data[["REGION"]]==regionsnames[b],]
+#regiondata2 <- subset(.qr_attr(afrogisdata2), REGION==regionsnames[b])
+regiondata2 =.qr_attr(afrogisdata2)[.qr_attr(afrogisdata2)[["REGION"]]==regionsnames[b],]
 
 #print(wilcox.test(regiondata1[[names(var2[i])]] ,regiondata2[[names(var2[i])]]))
 model=wilcox.test(regiondata1[[names(var2[i])]] ,regiondata2[[names(var2[i])]])
@@ -2110,33 +2228,33 @@ i=i+1
 }
 
 # anova
-print("Real Anova:original data")
+vcat("Real Anova:original data\n")
 manova=c()
 #var2=log(var2)
 i=1
 while (i<=length(var2)){
-print(names(var2[i]))
-#afrogisdata2@data[is.na(afrogisdata2@data)] <-0
+vprint(names(var2[i]))
+#.qr_attr(afrogisdata2)[is.na(.qr_attr(afrogisdata2))] <-0
 #diff[is.na(diff)] <- 9999
-#fit=aov((afrogisdata2@data[[names(var2[i])]])~ afrogisdata2@data$REGION)
-fit=aov((afrogisdata2@data[[names(var2[i])]])~ afrogisdata2@data[["REGION"]])
-print(summary(fit))
+#fit=aov((.qr_attr(afrogisdata2)[[names(var2[i])]])~ .qr_attr(afrogisdata2)$REGION)
+fit=aov((.qr_attr(afrogisdata2)[[names(var2[i])]])~ .qr_attr(afrogisdata2)[["REGION"]])
+vprint(summary(fit))
 tukey=TukeyHSD(fit)
-print(TukeyHSD(fit))
+vprint(TukeyHSD(fit))
 #plot(TukeyHSD(fit))
 #plot(fit) # diagnostic plots
-#manova[[names(var2[i])]]=afrogisdata2@data[[names(var2[i])]]
+#manova[[names(var2[i])]]=.qr_attr(afrogisdata2)[[names(var2[i])]]
 i=i+1
 }
 
 
 }
-if(plot=="admin"||type=="admin"){
+if(plotarg=="admin"||type=="admin"){
 
 
 
 #here
-if(par==""){
+if(length(par)==1 && par==""){
 par(mfrow=c(1,2))
 
 }else
@@ -2155,15 +2273,15 @@ cexvar=0.6
 
 
 
-#regindex<-c(length(x$gisdata@data)+1:27)
-#print (names(x$gisdata@data))
+#regindex<-c(length(.qr_attr(x$gisdata))+1:27)
+#print (names(.qr_attr(x$gisdata)))
 
-#var3=names(x$gisdata@data[regindex])
+#var3=names(.qr_attr(x$gisdata)[regindex])
 #district comparason
 afrogisdata2region=x$gisdata
 var4=c("index","meanindex1","means","rank1","meanrank1","cluster")
-afrogisdata2region@data[var4]=round(afrogisdata2region@data[var4],digits=2)
-afrogisdata2region@data[["cluster"]]=round(afrogisdata2region@data[["cluster"]],digits=0)
+.qr_attr(afrogisdata2region)[var4]=round(.qr_attr(afrogisdata2region)[var4],digits=2)
+.qr_attr(afrogisdata2region)[["cluster"]]=round(.qr_attr(afrogisdata2region)[["cluster"]],digits=0)
 
 Scale=FALSE
 i=1
@@ -2192,11 +2310,11 @@ i=i+1
 ########################################
 #non parametric
 #########################################
-var2=x$gisdata@data
+var2=.qr_attr(x$gisdata)
 modmod2004_2012=x
- var2=modmod2004_2012$gisdata@data[names(modmod2004_2012$data)]
+ var2=.qr_attr(modmod2004_2012$gisdata)[names(modmod2004_2012$data)]
 
-print("nonparametric variable")
+vcat("nonparametric variable\n")
 i=1
 while (i<=length(var2)){
 
@@ -2237,7 +2355,7 @@ names(output)=datanames
 output$variablename=sub("_", "",output$variablename)
 row.names(output)=output$variablename
 output$variablename=NULL
-print(output)
+vprint(output)
 }
 
 
